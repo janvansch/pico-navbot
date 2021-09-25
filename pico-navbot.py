@@ -1,12 +1,13 @@
 # NavBot control code
 # MicroPython
-# By Johannes van Schalkwyk
+# By Johannes van Schalkwyk, all rights reserved
 
 # =================
 #  Import Modules:
 # =================
 
 from machine import Pin, UART, I2C, PWM, Timer
+import _thread
 import utime
 import math
 import ujson
@@ -26,7 +27,7 @@ led = Pin(25, Pin.OUT)
 # -----------------------------------
 # Setup UART channel 0 (TX = GP0 & RX = GP1), with baud rate of 9600
 # Connect GP0 (UART0 Tx) to Rx of HC-05/06 Bluetooth module (brown)
-# Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (white)
+# Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (orange)
 # Module powerred by 5v bus, but RX and TX powerred by internal 3.3v regulator
 
 uart = UART(0, 9600)
@@ -62,24 +63,6 @@ front_right_wheel = Pin(7, Pin.IN) # dark purple
 #rear_left_wheel = Pin(8, Pin.IN) # grey
 #rear_right_wheel = Pin(9, Pin.IN) # white
 
-# -----------------------------------
-#  Motor Controler (L298N) interface
-# -----------------------------------
-# Remember to connect L298N GND to Pico GND
-# Pico output signal (3.3v), no Logic Level Converter required
-
-# Forward & reverse control
-motor_1a = Pin(18, Pin.OUT) # L298N IN4 orange right
-motor_1b = Pin(19, Pin.OUT) # L298N IN3 yellow right
-motor_2a = Pin(20, Pin.OUT) # L298N IN2 green left
-motor_2b = Pin(21, Pin.OUT) # L298N IN1 blue left
-
-# Speed control - PWM
-motor_1_pwm = PWM(Pin(16)) # L298N ENA left purple
-motor_1_pwm.freq(50)
-motor_2_pwm = PWM(Pin(17)) # L298N ENB right light grey
-motor_2_pwm.freq(50)
-
 # ---------------------
 #  IR sensor interface
 # ---------------------
@@ -92,6 +75,24 @@ ir_front_right = Pin(12, Pin.IN) # green
 ir_rear_centre = Pin(13, Pin.IN) # blue
 ir_mid_left = Pin(14, Pin.IN) # purple
 ir_mid_right = Pin(15, Pin.IN) # light grey
+
+# -----------------------------------
+#  Motor Controler (L298N) interface
+# -----------------------------------
+# Remember to connect L298N GND to Pico GND
+# Pico output signal (3.3v), no Logic Level Converter required
+
+# Speed control - PWM
+motor_1_pwm = PWM(Pin(16)) # L298N ENA blue left
+motor_1_pwm.freq(50)
+motor_2_pwm = PWM(Pin(17)) # L298N ENB brown right
+motor_2_pwm.freq(50)
+
+# Forward & reverse control
+motor_1a = Pin(18, Pin.OUT) # L298N IN4 red right
+motor_1b = Pin(19, Pin.OUT) # L298N IN3 orange right
+motor_2a = Pin(20, Pin.OUT) # L298N IN2 yellow left
+motor_2b = Pin(21, Pin.OUT) # L298N IN1 green left
 
 # -----------------------
 #  Servo interface - PWM
@@ -112,6 +113,8 @@ timer = Timer()
 #  Initialise global variables
 # -----------------------------
 
+avg_heading = 0
+second_thread = True
 detour_mode = False
 detour_mode_count = 0
 distance = 0
@@ -123,9 +126,67 @@ front_right_wheel_count = 0
 rear_left_wheel_count = 0
 rear_right_wheel_count = 0
 
+# ------------
+#  Constants:
+# ------------
+
+# Required MPU6050 Registers and their Address
+
+# Address of Configuration register A
+REGISTER_A = 0x00
+
+# Address of configuration register B
+REGISTER_B = 0x01
+
+# Address of mode register
+REGISTER_MODE = 0x02
+
+# Address of X-axis MSB data register
+X_AXIS_H = 0x03
+
+# Address of Z-axis MSB data register
+Z_AXIS_H = 0x05
+
+# Address of Y-axis MSB data register
+Y_AXIS_H = 0x07
+
+# Declination angle in radians of location
+DECLINATION = -0.4459       
+# -25degrees 33minutes 25.55 -0.4459 radians
+                                
+# Define pi value
+PI = 3.14159265359     
+
+# HMC5883L magnetometer device address
+DEVICE_ADDRESS = 0x1e
+
+# -----------------------------------
+#  Initialise HMC5883L magnetometer:
+# -----------------------------------
+# Write to Configuration Register A
+i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_A, b'\x70')
+
+# Write to Configuration Register B for gain
+i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_B, b'\xa0')
+
+# Write to mode Register for selecting mode
+i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_MODE, b'0')
+    
 # =========
 #  Helpers
 # =========
+
+# Start heading monitor as second thread
+def start_heading_monitor():
+    global second_thread
+    second_thread = True
+    print("--- Start heading monitor")
+    _thread.start_new_thread((monitor_heading), ())
+
+# Trigger second thread stop
+def stop_heading_monitor():
+    global second_thread
+    second_thread = False
 
 # Navigation state
 
@@ -156,12 +217,9 @@ def set_detour_mode():
         # This will suspend the current detour drive.
         detour_mode_count +=1
     else:
-        
         detour_mode_count = 1
-        
         detour_mode = True
         print(">>> Detour mode set!")
-        
         nav_state = "detour"
 
 def set_target_mode():
@@ -172,6 +230,25 @@ def set_target_mode():
     nav_state = "target"
     global detour_mode_count
     detour_mode_count = 0
+
+def read_raw_data(addr):
+    
+    # Read raw 16-bit value
+    byte_high = i2c.readfrom_mem(DEVICE_ADDRESS, addr, 1)
+    byte_low = i2c.readfrom_mem(DEVICE_ADDRESS, addr+1, 1)
+    
+    # Convert to integer
+    high = int.from_bytes(byte_high, "big")
+    low = int.from_bytes(byte_low, "big")
+    
+    # Concatenate higher and lower value (only works with integers)
+    value = ((high << 8) | low)
+      
+    # To get signed value from module
+    if(value > 32768):
+        value = value - 65536
+    
+    return value
 
 # ====================
 #  Interrupt Handlers
@@ -208,7 +285,7 @@ def front_right_wheel_counter(pin):
 #  Handlers for obstical detection
 # ---------------------------------
 
-# When an obstical is detected a detour is required
+# When an obstical is detected make a detour
 
 def obstical_front_left(pin):
     if (pin.value() == 0):
@@ -246,23 +323,75 @@ def obstical_rear_centre(pin):
     else:
         led.off()
 
-def obstical_mid_left(pin):
-    if (pin.value() == 0):
-        stop()
-        led.on()
-        print("*** Obsticale - Mid left")
-        set_detour_mode()
-    else:
-        led.off()
+# def obstical_mid_left(pin):
+#     if (pin.value() == 0):
+#         stop()
+#         led.on()
+#         print("*** Obsticale - Mid left")
+#         set_detour_mode()
+#     else:
+#         led.off()
+# 
+# def obstical_mid_right(pin):
+#     if (pin.value() == 0):
+#         stop()
+#         led.on()
+#         print("*** Obsticale - Mid Right")
+#         set_detour_mode()
+#     else:
+#         led.off()
 
-def obstical_mid_right(pin):
-    if (pin.value() == 0):
-        stop()
-        led.on()
-        print("*** Obsticale - Mid Right")
-        set_detour_mode()
-    else:
-        led.off()
+# ========================
+#  Second Thread Function
+# ========================
+def monitor_heading():
+    
+    global avg_heading
+    
+    count = 0
+    sum_heading_angles = 0
+
+    while second_thread:
+            
+        # Read Accelerometer raw value
+        x = read_raw_data(X_AXIS_H)
+        z = read_raw_data(Z_AXIS_H)
+        y = read_raw_data(Y_AXIS_H)
+        
+        #print("X: ", x)
+        #print("Y: ", y)
+
+        heading = math.atan2(y, x) + DECLINATION
+        
+        # Due to declination check for >360 degree
+        if(heading > 2*PI):
+            heading = heading - 2*PI
+
+        # Check for sign
+        if(heading < 0):
+            heading = heading + 2*PI
+
+        # Convert into angle
+        heading_angle = heading * 180/PI
+            
+        count += 1
+        sum_heading_angles = sum_heading_angles + heading_angle
+        
+        
+        if count == 50:
+            
+            #print(sum_heading_angles, " ", round(sum_heading_angles/count, 1))
+            #print ("Heading Angle = %d°" %(sum_heading_angles/count))
+            avg_heading = round(sum_heading_angles/count, 1)
+            count = 0
+            sum_heading_angles = 0
+            
+            start_time = utime.ticks_ms()
+            interval = 500
+            while utime.ticks_ms() - start_time < interval:
+                pass
+            # utime.sleep(0.5) is this blocking, e.g. irq
+    _thread.exit()
 
 # ==================
 #  Hardware Control
@@ -353,7 +482,7 @@ def sonic_sense(timer):
 
 def cycle_servo():
     
-    print("Test servo")
+    print("--- Test servo")
 
     for position in range (1150, 8650, 50):
         servo_pwm.duty_u16(position)
@@ -365,7 +494,7 @@ def cycle_servo():
         
     angle_servo(90)
     
-    print("Servo test complete")
+    print("--- Servo test complete")
 
 def angle_servo(deg):
 
@@ -399,12 +528,12 @@ def stop():
     motor_2b.low()
 
 def forward():
-    print(">>> Set FORWARD >>>")
+    #print(">>> Set FORWARD >>>")
     motor_1a.low()
     motor_1b.high()
     motor_2a.high()
     motor_2b.low()
-    print ("--- FORWARD set")
+    #print ("--- FORWARD set")
 
 def reverse():
     print("<<< Set REVERSE <<<")
@@ -468,7 +597,7 @@ def set_speed(speed):
     if duty > 0:
         motor_1_pwm.duty_u16(duty)
         motor_2_pwm.duty_u16(duty)
-        print ("--- PWM duty set for required speed")
+       #print ("--- PWM duty set for required speed")
         
     else:
         print ("*** ERROR - invalid speed ***")
@@ -596,7 +725,9 @@ def fwd_right_curve(speed='medium', turn_rate='gentle'):
 #  Drive Control
 # ===============
 #
-#  Reset drive distance counters
+# Reset drive distance counters -
+# This must be done before the start of a drive while the bot is still stationary
+# in order to avoid conflicts between this and the IRQ of the motor turn pulse counter
 #
 def reset_front_left_wheel_counter():
     global front_left_wheel_count
@@ -623,7 +754,7 @@ def calc_click_distance():
     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
     
     distance_per_click = wheel_circumference / (slots)
-    print ("--- Click distance = ", distance_per_click)
+    #print ("--- Click distance = ", distance_per_click)
     
     return distance_per_click
 
@@ -631,10 +762,10 @@ def calc_click_distance():
 #  Convert distance (cm) into slots count
 #
 def calc_clicks(distance_cm):
-    print ("--- Convert distance to clicks")
+    #print ("--- Convert distance to clicks")
     distance_mm = distance_cm * 10
     clicks = int(distance_mm / calc_click_distance())
-    print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
+    #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
     return clicks
 
 #
@@ -674,13 +805,13 @@ def drive_target(target_distance):
     print("--- Distance to target: ", target_distance, " / Clicks: ", clicks)
     
     # Set speed
-    print ("--- Set speed")
+    #print ("--- Set speed")
     speed = "full"
     set_speed(speed)
     print ("--- Speed set to ", speed)
     
     # Drive forward
-    print ("--- Start drive to target")
+    print ("--- Drive forward")
     forward()
     
     near_target = False
@@ -707,7 +838,7 @@ def drive_target(target_distance):
         ##############################
         
         # Slow down when 80% complete        
-        if (front_left_wheel_count / clicks) * 100 > 80 and not near_target:
+        if (front_left_wheel_count / clicks) * 100 > 80.0 and not near_target:
             near_target = True
             set_speed('medium')
             print("--- slow down, almost at target")
@@ -774,6 +905,8 @@ def read_compass():
 # def calc_target_distance():
 #     new_target_distance = 100
 #     return new_target_distance
+
+
 
 def calc_heading(turn_angle):
     
@@ -842,7 +975,7 @@ def turn_to_heading(req_heading):
     req_heading = 90
 
     # Execute turn
-    print ("--- Turn to heading ---")
+    print ("--- Turn to heading")
     current_heading = read_compass()
     if current_heading > req_heading:
         if req_heading < current_heading - 180:
@@ -867,7 +1000,7 @@ def turn_to_heading(req_heading):
                 pass
             stop()
     else:
-        print("--- On course")
+        print("--- On course, no turn required")
 
 def verify_heading(req_heading, distance_remaining, current_speed):
 
@@ -1087,10 +1220,11 @@ def go_target(target_position):
     while target_state == "executing":
 
         # Turn to required heading
+        print("=== Current heading: ", avg_heading)
         turn_to_heading(target_heading)
 
         # Drive to target
-        print ('=== Drive to target')
+        #print ('=== Drive to target')
         remaining_distance = drive_target(target_distance)
 
         # Process drive outcome:
@@ -1138,7 +1272,7 @@ def router(route):
         leg_count = 0
         route_state = 'executing'
         while route_state == 'executing':
-            print ("--- Processing leg number: ", leg_count + 1)
+            #print ("--- Processing leg number: ", leg_count + 1)
             target_data = load_route()
             #target_data = route[leg_count] #=======>
             target_state = go_target(target_data)
@@ -1190,21 +1324,19 @@ def get_start():
 
     return auto_state
 
-
 def main():
 
     #
     # Configure timer interrupt event for sonic sensor
     #
     timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-    print ('--- started distance sensing')
-
+    
     # Set Mode - auto or manual
     mode = select_mode()
 
     # Self navigation mode selected
     if mode == "auto":
-        print ('*** Self Navigation Mode Selected ***')
+        #print ('*** Self Navigation Mode Selected ***')
 
         route = load_route()
 
@@ -1254,19 +1386,19 @@ def main():
 ir_front_left.irq(handler=obstical_front_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 
 #ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING) # obstacle
-#ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_RISING)
-ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_RISING)
+#ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 
-#ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING) # obstacle
-ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING) # obstacle
+# ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 
 # - Rear:
 ir_rear_centre.irq(handler=obstical_rear_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 #ir_rear_centre.irq(handler=obstical_rear_centre, trigger=Pin.IRQ_FALLING) # obstacle
 
 # - Middle:
-ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
-ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+#ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+#ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 #ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING) # obstacle
 #ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING) # obstacle
 #ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_RISING) # no obstacle
@@ -1300,21 +1432,50 @@ front_right_wheel.irq(handler=front_right_wheel_counter, trigger=Pin.IRQ_RISING)
 #  Execution Control
 # ===================
 try:
+    
+    # Start reading compass to monitor heading 
+    start_heading_monitor()
+    
+    # Test servo
     cycle_servo()
-    # start main loop
-    print ("--- Starting main loop ---")
+    
+    # Start main loop
     main()
     # test_setup()
     #timer.deinit()
-    print ('*** End Execution ***')
+    print('*** Execution Complete ***')
+    timer.deinit()
+    stop_heading_monitor()
+    usys.exit()
+    
 
 except KeyboardInterrupt:
-    # Abort, stop bot
-    print ('CTRL-C received, Abort')
-    machine.reset()
+    # Abort, stop motors
     stop()
-
-# finally:
-# Cleanup
+    print('CTRL-C received, Abort')
+    print ('*** Reset ***')
     timer.deinit()
+    stop_heading_monitor()
+    machine.reset()
 
+except Exception as ex:
+    # Exception, stop motors
+    stop()
+    print('An exception as occurred!')
+    print(ex)
+    print('*** End Execution ***')
+    timer.deinit()
+    stop_heading_monitor()
+    usys.exit()
+
+except:
+    # Exception, stop motors
+    stop()
+    print('An error has occurred.')
+
+finally:
+    # Cleanup, stop motors
+    stop()
+    timer.deinit()
+    stop_heading_monitor()
+    usys.exit()
