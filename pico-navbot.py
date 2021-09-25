@@ -1,21 +1,17 @@
-# Import Modules:
-
+# =================
+#  Import Modules:
+# =================
 from machine import Pin, PWM, Timer, UART
+# from machine import WDT
 import utime
 import ujson
 
-# ------------------------
+# ========================
 #  Initialisation Section
-# ------------------------
+# ========================
 
-# Initialise some global variables
-
-distance = 0
-front_left_encoder_count = 0
-front_right_encoder_count = 0
-rear_left_encoder_count = 0
-rear_right_encoder_count = 0
-
+# Set Timeout
+#wdt = WDT(id=0, timeout=5000) 
 # Onboard LED object
 
 led = Pin(25, Pin.OUT)
@@ -44,8 +40,8 @@ encoder_rear_left = Pin(12, Pin.IN) # white
 
 # Sonic sensor interface 
 
-trigger = Pin(14, Pin.OUT)
-echo = Pin(15, Pin.IN)
+trigger = Pin(14, Pin.OUT) # brown
+echo = Pin(15, Pin.IN) # white
 
 # Servo PWM interface
 
@@ -63,34 +59,21 @@ motor_2b = Pin(21, Pin.OUT) # L298N IN1 blue
 # Define timer object
 timer = Timer()
 
-# -------------------------
-#  Bluetooth Communication
-# -------------------------
+# Initialise global variables
 
-#     weather_data = {
-#         "temp" : temp,
-#         "humid" : hum,
-#         "baro" : pres
-#     }
-#     weather_data_json = ujson.dumps(weather_data)
-#     
-#     time.sleep(8)
-#     
-#     LED.value(1)
-#     uart.write(weather_data_json)
-#     LED.value(0)
+detour_mode = False
+distance = 0
+heading = 0
+current_heading = 0
+detour_heading = 0
+front_left_encoder_count = 0
+front_right_encoder_count = 0
+rear_left_encoder_count = 0
+rear_right_encoder_count = 0
 
-def send_data(tx_data):
-    tx_data_json = ujson.dumps(tx_data)
-    uart.write(tx_data_json)
-
-def receive_data():
-    data = uart.readline()
-    return data
-
-# --------------------
+# ====================
 #  Interrupt Handlers 
-# --------------------
+# ====================
 
 #
 # Process data received on UART-0 channel received dataprocess_rx,
@@ -124,120 +107,103 @@ def rear_right_encoder_counter(pin):
 #
 
 def obstical_front_left(pin):
+    global detour_mode
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Front Left")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
         
 def obstical_front_centre(pin):
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Front Center")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
 
 def obstical_front_right(pin):
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Front Right")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
 
 def obstical_rear_centre(pin):
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Rear Centre")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
 
 def obstical_mid_left(pin):
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Mid left")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
 
 def obstical_mid_right(pin):
     if (pin.value() == 0):
+        stop()
         led.on()
         print("*** Obsticale - Mid Right")
-        stop()
-        setServoCycle()
+        global detour_mode
+        detour_mode = True
+        print("===> Detour mode")
     else:
         led.off()
 
-# ---------------
-#  Servo Control
-# ---------------
+# ==================
+#  Hardware Control
+# ==================
+# -----------------------------------
+#  Bluetooth Communication Functions
+# -----------------------------------
 
-def setServoCycle():
-    for position in range (800, 8000, 50):
-        pwm.duty_u16(position)
-        utime.sleep(0.01)
-        
-    for position in range (8000, 800, -50):
-        pwm.duty_u16(position)
-        utime.sleep(0.01)
+#     weather_data = {
+#         "temp" : temp,
+#         "humid" : hum,
+#         "baro" : pres
+#     }
+#     weather_data_json = ujson.dumps(weather_data)
+#     
+#     time.sleep(8)
+#     
+#     LED.value(1)
+#     uart.write(weather_data_json)
+#     LED.value(0)
 
-def angle_servo(degrees):
-    position = max(min(9000, (degrees - 0) * (9000 - 1000) // (180 - 0) + 1000), 1000)
-    pwm.duty_u16(position)
-    utime.sleep(0.01)
+def send_data(tx_data):
+    tx_data_json = ujson.dumps(tx_data)
+    uart.write(tx_data_json)
 
-# ---------------   
-#  Motor Control
-# ---------------
+def receive_data():
+    data = uart.readline()
+    return data
 
-def stop():
-    print("### Full Stop")
-    motor_1a.low()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.low()
-    
-def forward():
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.high()
-    motor_2b.low()
-    
-def reverse():
-    print("<<< REVERSE <<<")
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.high()
-
-def left():
-    print("<.> SPIN LEFT <.>")
-    # Spin Left - right wheels forward & left wheels reverse")
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.low()
-    motor_2b.high()
-
-def right():
-    print(">.< SPIN RIGHT >.<") 
-    # Spin Right - left wheels forward & right wheels reverse")
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.high()
-    motor_2b.low()
-
-# -----------------------
-# Sonic Sensor Functions
-# -----------------------
+# ------------------------
+#  Sonic Sensor Functions
+# ------------------------
 
 def get_distance():
     global distance
@@ -295,9 +261,82 @@ def sonic_sense(timer):
         #start timer again
         timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
+# -------------------------   
+#  Motor Control Functions
+# -------------------------
+
+def stop():
+    print("### Full Stop")
+    motor_1a.low()
+    motor_1b.low()
+    motor_2a.low()
+    motor_2b.low()
+    
+def forward():
+    motor_1a.low()
+    motor_1b.high()
+    motor_2a.high()
+    motor_2b.low()
+    
+def reverse():
+    print("<<< REVERSE <<<")
+    motor_1a.high()
+    motor_1b.low()
+    motor_2a.low()
+    motor_2b.high()
+
+def turn_left():
+    print("<.> TURN LEFT <.>")
+    # Spin Left - right wheels forward & left wheels reverse")
+    motor_1a.low()
+    motor_1b.high()
+    motor_2a.low()
+    motor_2b.high()
+
+def turn_right():
+    print(">.< TURN RIGHT >.<") 
+    # Spin Right - left wheels forward & right wheels reverse")
+    motor_1a.high()
+    motor_1b.low()
+    motor_2a.high()
+    motor_2b.low()
+    
 # ------------------------
-#  Move Control Functions
+#  Servo Control Function
 # ------------------------
+
+def cycle_servo():
+    for position in range (800, 8000, 50):
+        pwm.duty_u16(position)
+        utime.sleep(0.01)
+        
+    for position in range (8000, 800, -50):
+        pwm.duty_u16(position)
+        utime.sleep(0.01)
+
+def angle_servo(deg):
+    
+    # Set servo parameter values
+    max_deg = 180
+    min_deg = 0
+    max_duty = 8000
+    min_duty = 50
+    
+    # Calculate PWM Duty Cycle for deg
+    #position = max(min(max_duty, (deg - min_deg) * (max_duty - min_duty) // (max_deg - min_deg) + min_duty), min_duty)
+    position = int(min_duty + ((max_duty - min_duty) / (max_deg - min_deg) * deg))
+    
+    print("Position ", position)
+    
+    # Set the duty cycle of the PWM defined as pwm
+    pwm.duty_u16(position)
+    
+    # Wait for servo to set
+    utime.sleep(2)
+
+# ===============
+#  Drive Control
+# ===============
 
 def reset_front_left_encoder_counter():
     global front_left_encoder_count
@@ -325,29 +364,223 @@ def calc_clicks(leg_distance):
     clicks = int(leg_distance * 10 / distance_per_click)
     return clicks
 
-def move_forward(forward_distance):
-    #global left_rear_encoder_count
-    reset_rear_left_encoder_counter()
-    # Why does this work here but not at the end?????
-    reset_front_right_encoder_counter()
+def drive_forward(forward_distance):
     
+    # Turn sonic sensor forward
+    angle_servo(90)
+    
+    # Reset encoder counters
+    reset_front_left_encoder_counter() # Why does this work here but not at the end?????
+    reset_front_right_encoder_counter()
+    reset_rear_left_encoder_counter()
+    reset_rear_right_encoder_counter()
+    
+    # Convert distance into encoder pulses
     clicks = calc_clicks(forward_distance)
+    
     # Move forward while counter less than clicks
     print(">>> FORWARD >>>")
     print("--- Heading: 000, Distance: ", forward_distance)
     print("--- Clicks: ", clicks, "Encoder Count: ", rear_left_encoder_count)
-    #forward()
+    forward()
     while rear_left_encoder_count < clicks:
-        forward()
-        pass    
-    # Stop wheel when counter = clicks
+        if detour_mode:
+            stop()
+            break
+        
+    # Stop drive when counter = clicks
     stop()
+    
     print("==>Front Right Encoder Count: ", front_right_encoder_count)
     print("==>Rear Left Encoder Count: ", rear_left_encoder_count)
+    
+def drive_detour(slow, side):
+    # If for the detour the bot turned right drive until left is not blocked
+    # If for the detour the bot turned left drive until right is not blocked
+    print("Drive detour")
+    forward() # dummy test code
+    utime.sleep(2)
+    stop()
 
-# -------------------------
-#  Main Navigation Control
-# -------------------------
+# ====================
+#  Navigation Control
+# ====================
+
+def read_compass():
+    bearing = 90
+    return bearing
+
+def calc_target_heading():
+    new_target_heading = 90
+    return new_target_heading
+
+def calc_target_distance():
+    new_target_distance = 100
+    return new_target_distance
+
+def best_turn_angle():
+    # Use sonic sensor to scan for free space
+    # in a 180 degee arc at 30 degree intervals
+    # to avoid an obstical
+    
+    # Stop Sonic Scan IRQ Timer
+    print("--- Stop Timer")
+    timer.deinit()
+    
+    # Scan 90 degrees right
+    print("--- scan R90")
+    angle_servo(0)
+    #utime.sleep(2)
+    distance_R90 = get_distance()
+    print("--- R90 open distance = ", distance_R90)
+    
+    # Scan 60 degrees right
+    print("--- scan R60")
+    angle_servo(30)
+    #utime.sleep(2)
+    distance_R60 = get_distance()
+    print("--- R60 open distance = ", distance_R60)
+    
+    # Scan 30 degrees right
+    print("--- scan R30")
+    angle_servo(60)
+    #utime.sleep(2)
+    distance_R30 = get_distance()
+    print("--- R30 open distance = ", distance_R30)
+    
+    # Scan Front
+    print("--- scan Forward")
+    angle_servo(90)
+    #utime.sleep(2)
+    distance_F0 = get_distance()
+    print("--- Forward open distance = ", distance_F0)
+    
+    # Scan 30 degrees left
+    print("--- scan L30")
+    angle_servo(120)
+    #utime.sleep(2)
+    distance_L30 = get_distance()
+    print("--- L30 open distance = ", distance_L30)
+    
+    # Scan 60 degrees left
+    print("--- scan L60")
+    angle_servo(150)
+    #utime.sleep(2)
+    distance_L60 = get_distance()
+    print("--- L60 open distance = ", distance_L60)
+    
+    # Scan 90 degrees left
+    print("--- scan L90")
+    angle_servo(180)
+    #utime.sleep(2)
+    distance_L90 = get_distance()
+    print("--- L90 open distance = ", distance_L90)
+    
+    # Determine best detour angle
+    free = distance_F0
+    turn_angle = 0 # keep going forward
+    if distance_R90 > free:
+        free = distance_R90
+        turn_angle = 90 # turn 90 degrees right
+    if distance_R60 > free:
+        free = distance_R60
+        turn_angle = 60 # turn 60 degrees right
+    if distance_R30 > free:
+        free = distance_R30
+        turn_angle = 30 # turn 30 degrees right
+    if distance_L30 > free:
+        free = distance_L30
+        turn_angle = -30 # turn 30 degrees left
+    if distance_L60 > free:
+        free = distance_L60
+        turn_angle = -60 # turn 60 degrees left
+    if distance_L90 > free:
+        free = distance_L90
+        turn_angle = -90 # turn 90 degrees left
+
+    print("--- Best turn angle: ", turn_angle, " with free distance of ", free, "cm")    
+    
+    # set ultra sound sensor to scan forward
+    angle_servo(90)
+    
+    # Start Sonic Scan IRQ Timer
+    print("--- Start Timer")
+    timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    
+    return turn_angle
+
+def calc_detour_heading():
+    current_heading = read_compass()
+    turn_angle = best_turn_angle()
+    if (current_heading + turn_angle) > 360:
+        detour_heading = (current_heading + turn_angle) - 360
+    elif (current_heading + turn_angle) < 0:
+        detour_heading = 360 + (current_heading + turn_angle)
+    else:
+        detour_heading = current_heading + turn_angle
+
+    print("Detour heading: ", detour_heading)
+    return detour_heading
+        
+def turn_to_heading(req_heading):
+    #
+    # For testing only
+    #
+    req_heading = 90
+    
+    # Execute turn
+    current_heading = read_compass()
+    if current_heading > req_heading:
+        if req_heading < current_heading - 180:
+            turn_right()
+            while read_compass() != req_heading:
+                pass
+            stop()
+        else:
+            turn_left()
+            while read_compass() != req_heading:
+                pass
+            stop()
+    elif current_heading < req_heading:
+        if req_heading > current_heading + 180:
+            turn_left()
+            while read_compass() != req_heading:
+                pass
+            stop()
+        else:
+            turn_right()
+            while read_compass() != req_heading:
+                pass
+            stop()
+    else:
+        print("On course")
+            
+def verify_heading(req_heading, distance_remaining):
+    pass
+    heading = read_compass()
+    deviance = req_heading
+    if deviance > 1 and distance > 10:
+        stop()
+        turn_to_heading(req_heading)
+        move_forward(distance_remaining)
+    
+def detour():
+    # Current heading to target is blocked, determine a detour
+    detour_heading = calc_detour_heading()
+    turn_to_heading(detour_heading)
+    drive_detour("speed", "side")
+    # obsticle avoided, resume drive to target
+    target_heading = calc_target_heading()
+    target_distance = calc_target_distance()
+    turn_to_heading(detour_heading)
+    drive_forward(target_distance)
+    # Problem:
+    #  - how to return to route() to execute additional legs of original route
+
+# ==================
+#  Route Definition
+# ==================
+
 # The definition of a route. A route has one or more legs
 # A leg is defined as a heading and a distance
 # A route can be in one of four states:
@@ -356,20 +589,31 @@ def move_forward(forward_distance):
 # - Suspended: stopped can't find a way to the target; waiting for operator input
 # - Complete: arrived at calculated target point; waiting for operator input
 
-def main():
-    # Main loop
+def test_route():
+    leg_heading = 90 # degrees
+    leg_distance = 100 # cm
+    # current_heading = leg_heading
+    turn_to_heading(leg_heading)
+    drive_forward(leg_distance)
+    if detour_mode:
+        detour()
+    else:
+        print ('*** Route Test Completed ***')
+    
+# Motor control test
+def test_setup():
     run = True
     test_cycles = 2
     run_time = 2
     stop_time = .5
     count = 1
-    
+    # Turn sonic sensor forward
     angle_servo(90)
         
     while run:
         led.off()
-        # Forward Test (move_forward(distance in cm) and stop
-        move_forward(100)
+        # Forward Test
+        forward()
         utime.sleep(stop_time)
         # Reverse Test
         reverse()
@@ -390,13 +634,18 @@ def main():
         count = count + 1  
         if count > test_cycles:
             run = False
+    
+    print ('*** Setup Test Completed ***')
+    
+def run_test():
+    # test_setup()
+    test_route()
     stop()
     # timer.deinit()
-    print ('*** Test Completed ***')
 
-# -------------------------------
+# ===============================
 #  Interrupts Definition Section
-# -------------------------------
+# ===============================
 #
 # Setup IR obstical sensor interrupts
 #
@@ -430,18 +679,21 @@ timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 #
 #uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
 
-# -------------------
+# ===================
 #  Execution Control
-# -------------------
+# ===================
 try:
+    cycle_servo()
     # start main loop
-    main()
+    # main()
+    run_test()
     #timer.deinit()
     
 except KeyboardInterrupt:
     # Abort, stop bot
     print ('CTRL-C received, Abort')
-    stop()
+    machine.reset()
+    #stop()
     
 finally:
     # Cleanup
