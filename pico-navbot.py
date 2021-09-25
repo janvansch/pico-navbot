@@ -93,6 +93,7 @@ timer = Timer()
 # -----------------------------
 
 detour_mode = False
+detour_mode_count = 0
 distance = 0
 heading = 0
 current_heading = 0
@@ -125,11 +126,18 @@ def switch_nav_mode():
 #         nav_state = "detour"
 
 def set_detour_mode():
-    global detour_mode
-    detour_mode = True
-    print(">>> Detour mode set!")
-    global nav_state
-    nav_state = "detour"
+    
+    if detour_mode:
+        # Encounterred an obstical in the detour drive heading
+        detour_mode_count +=1
+    else:
+        global detour_mode_count
+        detour_mode_count = 1
+        global detour_mode
+        detour_mode = True
+        print(">>> Detour mode set!")
+        global nav_state
+        nav_state = "detour"
 
 def set_target_mode():
     global detour_mode
@@ -137,6 +145,8 @@ def set_target_mode():
     print("--- Target mode set!")
     global nav_state
     nav_state = "target"
+    global detour_mode_count
+    detour_mode_count = 0
 
 # ====================
 #  Interrupt Handlers
@@ -149,9 +159,9 @@ def set_target_mode():
 def process_rx():
     pass
 
-#
-# Speed encoder pulse counters
-#
+# ------------------------------
+#  Speed encoder pulse counters
+# ------------------------------
 
 def front_left_encoder_counter(pin):
     global front_left_encoder_count
@@ -169,12 +179,13 @@ def rear_right_encoder_counter(pin):
     global rear_right_encoder_count
     rear_right_encoder_count += 1
 
-#
-# Handlers for obstical detection
-#
+# ---------------------------------
+#  Handlers for obstical detection
+# ---------------------------------
+
+# When an obstical is detected a detour is required6
 
 def obstical_front_left(pin):
-    global detour_mode
     if (pin.value() == 0):
         stop()
         led.on()
@@ -378,7 +389,7 @@ def set_power(motor, power):
         elif motor == 'right':
             motor_2_pwm.duty_u16(duty)
 
-        elif motor == 'all':
+        elif motor == 'both':
             motor_1_pwm.duty_u16(duty)
             motor_2_pwm.duty_u16(duty)
 
@@ -431,6 +442,10 @@ def angle_servo(deg):
 #  Drive Control
 # ===============
 
+#
+#  Reset drive distance counters
+#
+
 def reset_front_left_encoder_counter():
     global front_left_encoder_count
     front_left_encoder_count = 0
@@ -447,19 +462,51 @@ def reset_rear_right_encoder_counter():
     global rear_right_encoder_count
     rear_right_encoder_count = 0
 
-def calc_clicks(leg_distance_cm):
-    leg_distance_mm = leg_distance_cm * 10
+def calc_click_distance():
     # wheel diameter in mm
     wheel_diameter = 65
     # speed encoder slots
     slots = 20
+    
     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
+    
     distance_per_click = wheel_circumference / (slots)
-    clicks = int(leg_distance_mm / distance_per_click)
+    
+    return click_distance
+
+#
+#  Convert distance (cm) into encoder counts
+#
+
+def calc_clicks(distance_cm):
+    distance_mm = distance_cm * 10
+    clicks = int(leg_distance_mm / calc_click_distance())
     return clicks
 
-def drive_target(target_distance):
+#
+#  Convert clicks counted to distance travelled
+#
 
+def calc_distance(clicks):
+    distance_mm = clicks * calc_click_distance()
+    return distance_cm
+
+#
+# Monitor state of target side IR sensor
+#
+
+def side_sensor_state(side):
+    side_blocked = False
+    return side_blocked
+
+#
+#  Drive on target heading for required distance
+#
+
+def drive_target(target_distance):
+    
+    distance_remaining = 0
+    
     # Turn sonic sensor forward
     angle_servo(90)
 
@@ -471,27 +518,42 @@ def drive_target(target_distance):
 
     # Convert distance into encoder pulses
     clicks = calc_clicks(target_distance)
-
-    # Move forward while counter less than clicks
+    
     print(">>> FORWARD >>>")
     print("--- Distance: ", target_distance, " / Clicks: ", clicks)
-    set_power('all', 90)
+    
+    # Set power
+    set_power('both', 80)
+    
+    # Drive forward
     forward()
+    
+    # Continue forward while clicks counter is less than distance clicks
     while rear_left_encoder_count < clicks:
+        # Software interrupt - if detour mode is set stop drive
+        # A detour from original couse is required to avoid an obstical
         if detour_mode:
-            print("--- Detour mode set, target drive suspended")
             stop()
+            print("--- Detour mode set, target drive suspended")
+            
+            # Calculate average clicks
+            average_clicks = (front_right_encoder_count + rear_left_encoder_count) / 2
+            
+            # calculate and record remaining distance to target
+            distance_remaining = target_distance - calc_distance(average_clicks)
             break
+        
         ##############################
         # if course_deviation_right:
         #     slow_left()
         # if course_deviation_left:
         #     slow_right()
         ##############################
+        
+        # Slow down approaching target        
         if (rear_left_encoder_count / clicks) * 100 == 80:
             set_power('all', 50)
             print("--- slow down, almost at target")
-
 
     # Stop destination reached, counter = clicks
     stop()
@@ -499,24 +561,43 @@ def drive_target(target_distance):
     print("==> Front Right Encoder Count: ", front_right_encoder_count)
     print("==> Rear Left Encoder Count: ", rear_left_encoder_count)
 
-def sensor_state(side):
-    side_blocked = False
-    return side_blocked
+    return distance_remaining
 
-def drive_detour(slow, side):
-    # If for the detour the bot turned right drive until left is not blocked
-    # If for the detour the bot turned left drive until right is not blocked
-    side_blocked = True
+def drive_detour(side, count):
+    # If the bot made a turn to the right the target is on the left.
+    # Drive untill the left side is not blocked.
+    # If the bot made a turn to the left the target is on the right.
+    # Drive untill the right side is not blocked.
+    
+    target_blocked = True
 
     print("*** Drive detour ***")
-    set_power('all', 40)
-    forward() # dummy test code
+    
+    # Reset encoder counters to record detour drive distance
+    reset_front_left_encoder_counter()
+    reset_front_right_encoder_counter()
+    reset_rear_left_encoder_counter()
+    reset_rear_right_encoder_counter()
+    
+    # Slowly drive forward
+    set_power('all', 50)
+    
+    forward()
 
-    while side_blocked:
-        side_blocked = sensor_state(side)
-
+    while target_blocked and count == detour_mode_count:
+        # If the detour count increases it means an obstacle was encountered
+        # in the detour route. Stop current detour drive
+        if detour_mode_count != count:
+            
+            break
+        
+        target_blocked = side_sensor_state(side)
+        
     utime.sleep(5)
     stop()
+    
+    return target_blocked
+    
 
 # ====================
 #  Navigation Control
@@ -533,6 +614,50 @@ def calc_target_heading():
 def calc_target_distance():
     new_target_distance = 100
     return new_target_distance
+
+def calc_target_data(detour_angle, detour_distance, remaining_distance):
+    
+    # Calculate target heading and distance from current position.
+    # This is the new dead reconning point
+    # If the detour successfuly avoided the obstacle the
+    # navbot will drive to target from this point. If not
+    # a new detour will start from this point and the deviation
+    # from target will be calculated from this point
+    
+    # For detour travel distance how far did the navbot deviate
+    # from the original target heading? (the opposite)
+    
+    if detour_angle < abs(90):
+        deviation = math.sin(detour_angle) * detour_distance
+        # update remaining distance
+        remaining_distance_adjustment = math.sin(90 - detour angle) * remaining_distance
+        if detour_angle < 90:
+            adj_remaining_distance = remaining_distance - remaining_distance_adjustment
+        else:
+            adj_remaining_distance = remaining_distance + remaining_distance_adjustment
+        
+        # Right angle triangle of which two sides are known, need to calculate
+        # the hypotenuse using Pythagorean Theorem to get target distance
+        target_distance = math.sqrt((adj_remaining_distance ** 2) + (detour_distance ** 2))
+        
+        # calculate target heading
+        target_angle = math.asin((math.sin(90)/target_distance) * adj_remaining_distance)
+    
+    else:
+        
+        
+        
+    if detour_angle > 0:
+        target_angle = target_angle * -1
+        
+    target_heading = calc_heading(target_angle):
+    
+    target_data = {
+        "heading" : target_heading,
+        "distance" : target_distance
+    }
+    
+    return target_data
 
 def best_turn_angle():
     # Use sonic sensor to scan for free space
@@ -625,18 +750,22 @@ def best_turn_angle():
 
     return turn_angle
 
-def calc_detour_heading():
+def calc_heading(turn_angle):
+    
+    # Read current compass heading
     current_heading = read_compass()
-    turn_angle = best_turn_angle()
+    
+    # Calculate detour compass heading
     if (current_heading + turn_angle) > 360:
-        detour_heading = (current_heading + turn_angle) - 360
+        heading = (current_heading + turn_angle) - 360
     elif (current_heading + turn_angle) < 0:
-        detour_heading = 360 + (current_heading + turn_angle)
+        heading = 360 + (current_heading + turn_angle)
     else:
-        detour_heading = current_heading + turn_angle
+        heading = current_heading + turn_angle
 
     print("Detour heading: ", detour_heading)
-    return detour_heading
+    
+    return heading
 
 def turn_to_heading(req_heading):
     #
@@ -648,23 +777,23 @@ def turn_to_heading(req_heading):
     current_heading = read_compass()
     if current_heading > req_heading:
         if req_heading < current_heading - 180:
-            turn_right()
+            turn_right(50)
             while read_compass() != req_heading:
                 pass
             stop()
         else:
-            turn_left()
+            turn_left(50)
             while read_compass() != req_heading:
                 pass
             stop()
     elif current_heading < req_heading:
         if req_heading > current_heading + 180:
-            turn_left()
+            turn_left(50)
             while read_compass() != req_heading:
                 pass
             stop()
         else:
-            turn_right()
+            turn_right(50)
             while read_compass() != req_heading:
                 pass
             stop()
@@ -690,15 +819,46 @@ def verify_heading(req_heading, distance_remaining):
 
 def detour():
     # Current heading to target is blocked, do a detour
-    print ('*** Started Detour ***')
-    detour_heading = calc_detour_heading()
-    turn_to_heading(detour_heading)
-    # Drive detour
-    drive_detour("speed", "side")
-    set_target_mode()
+    # What happens when an obstical is encountered in detour?
+    #  1. Stop current detour
+    #  2. Repeat loop
+    
+    print ('*** Start Detour ***')
+    
+    while detour_mode:
+    
+        # Determine turn angle with best free distance 
+        turn_angle = best_turn_angle()
+        
+        # Determine detour heading
+        detour_heading = calc_heading(turn_angle)
+        turn_to_heading(detour_heading)
+        
+        # Determine obstical side
+        if turn_angle > 0:
+            obstical_side = "left"
+        else:
+            obstical_side = "right"
+            
+        # Drive detour
+        target_blocked = drive_detour(obstical_side, detour_mode_count)
+        # If detour drive ended and target is still blocked an obstacle was
+        # encounterred during the detour drive
+        
+        # At the current position what is the heading and distance to the target
+        target_data = calc_target_data(detour_angle, detour_distance, remaining_distance)
+        
+        if (not target_blocked):
+            set_target_mode()
+    
+    
+    return target_data
 
-def target(target_heading, target_distance):
-
+def target(target_data):
+    
+    target_heading = target_data['heading']
+    target_distance = target_data['distance']
+    
     target_state = "executing"
 
     while target_state == "executing":
@@ -707,18 +867,23 @@ def target(target_heading, target_distance):
         turn_to_heading(target_heading)
 
         # Drive distance to target
-        drive_target(target_distance)
+        remaining_distance = drive_target(target_distance)
 
-        # Process drive outcome
+        # Process drive outcome:
         if nav_state == "detour":
-            detour()
+            # Obstical encounterred, plan and drive detour
+            # Return detour information - angle and distance travelled
+            adj_target_data = detour()
+            
             if nav_state == "target":
                 print ('*** Detour Successful ***')
-                target_heading = calc_target_heading()
-                target_distance = calc_target_distance()
+                target_heading = adj_target_data['heading']
+                target_distance = adj_target_data['distance']
+                
             elif nav_state == "stop":
                 print ('*** Detour Unsuccessful ***')
                 target_state = "halt"
+                
         else:
             print ('*** Target Reached ***')
             target_state = 'complete'
@@ -747,7 +912,9 @@ def router(route):
         route_state = 'executing'
         while route_state == 'executing':
             print ("--- Processing leg number: ", leg_count + 1)
-            target_state = target(route['heading'], route['distance'])
+            target_data = route[leg_count] #=======>
+            target_state = target(target_data)
+            #target_state = target(route['heading'], route['distance'])
 
             if target_state == 'complete':
                 leg_count +=1
@@ -849,37 +1016,45 @@ def main():
 # ===============================
 #  Interrupts Definition Section
 # ===============================
-#
-# Setup IR obstical sensor interrupts
-#
+
+# -------------------------------------
+#  Setup IR obstical sensor interrupts
+# -------------------------------------
+
 # - Front:
 ir_front_left.irq(handler=obstical_front_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+
 # - Rear:
 ir_rear_centre.irq(handler=obstical_rear_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+
 # - Middle:
 # ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 # ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 
-#
-# Set speed encoder interrupts
-#
+# ------------------------------
+#  Set speed encoder interrupts
+# ------------------------------
+
 # - Front
 # encoder_front_left.irq(handler=front_left_encoder_counter, trigger=Pin.IRQ_RISING)
 encoder_front_right.irq(handler=front_right_encoder_counter, trigger=Pin.IRQ_RISING)
+
 # - Rear
 encoder_rear_left.irq(handler=rear_left_encoder_counter, trigger=Pin.IRQ_RISING)
 # encoder_rear_right.irq(handler=rear_right_encoder_counter, trigger=Pin.IRQ_RISING)
 
-#
-# Configure timer interrupt event
-#
+# ---------------------------------
+#  Configure timer interrupt event
+# ---------------------------------
+
 #timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
-#
-# UART RX interrupt
-#
+# -------------------
+#  UART RX interrupt
+# -------------------
+
 #uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
 
 # ===================
