@@ -1,9 +1,12 @@
+# NavBot control code
+# MicroPython
+# By Johannes van Schalkwyk
+
 # =================
 #  Import Modules:
 # =================
-from machine import Pin, PWM, Timer, UART
-#  from i2clibraries import i2c_hmc5883l
-# from machine import WDT
+
+from machine import Pin, UART, I2C, PWM, Timer
 import utime
 import math
 import ujson
@@ -12,22 +15,70 @@ import ujson
 #  Initialisation Section
 # ========================
 
-# Set Timeout
-#wdt = WDT(id=0, timeout=5000)
-
 # --------------------
 #  Onboard LED object
 # --------------------
+
 led = Pin(25, Pin.OUT)
 
-# -------------------------
-#  Bluetooth module - UART
-# -------------------------
+# -----------------------------------
+#  UART channel for Bluetooth module
+# -----------------------------------
+# Setup UART channel 0 (TX = GP0 & RX = GP1), with baud rate of 9600
 # Connect GP0 (UART0 Tx) to Rx of HC-05/06 Bluetooth module (brown)
 # Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (white)
-# Powerred by 5v bus, but RX and TX powerred by internal 3.3v regulator 
-# Create UART object connect to UART channel 0 at a baud rate of 9600
+# Module powerred by 5v bus, but RX and TX powerred by internal 3.3v regulator
+
 uart = UART(0, 9600)
+
+# --------------------------------
+#  I2C channel for Compass module
+# --------------------------------
+# Powerred by 3.3v bus
+# Does not require Logic Level Converter to convert sda to 3.3v
+# sda = green
+# scl = grey
+# Compass module address = 0x1e
+
+i2c = I2C(1, sda=Pin(2), scl=Pin(3), freq=400000)
+
+# ------------------------
+#  Sonic sensor interface
+# ------------------------
+# Powerred by 5v bus
+# Requires Logic Level Converter to convert echo signal to 3.3v (1 channel)
+
+trigger = Pin(4, Pin.OUT) # brown
+echo = Pin(5, Pin.IN) # white
+
+# -----------------------------------
+#  Wheel rotation sensor interface
+# -----------------------------------
+# Powerred by 5v bus of L298N
+# Requires Logic Level Converter to convert signal to 3.3v (4 channels)
+
+front_left_wheel = Pin(6, Pin.IN) #  blue	
+front_right_wheel = Pin(7, Pin.IN) # dark purple
+#rear_left_wheel = Pin(8, Pin.IN) # grey
+#rear_right_wheel = Pin(9, Pin.IN) # white
+
+# -----------------------------------
+#  Motor Controler (L298N) interface
+# -----------------------------------
+# Remember to connect L298N GND to Pico GND
+# Pico output signal (3.3v), no Logic Level Converter required
+
+# Forward & reverse control
+motor_1a = Pin(18, Pin.OUT) # L298N IN4 orange right
+motor_1b = Pin(19, Pin.OUT) # L298N IN3 yellow right
+motor_2a = Pin(20, Pin.OUT) # L298N IN2 green left
+motor_2b = Pin(21, Pin.OUT) # L298N IN1 blue left
+
+# Speed control - PWM
+motor_1_pwm = PWM(Pin(16)) # L298N ENA left purple
+motor_1_pwm.freq(50)
+motor_2_pwm = PWM(Pin(17)) # L298N ENB right light grey
+motor_2_pwm.freq(50)
 
 # ---------------------
 #  IR sensor interface
@@ -35,59 +86,20 @@ uart = UART(0, 9600)
 # Powerred by 5v bus
 # Requires Logic Level Converter to convert signal to 3.3v (6 channels)
 
-# ir_mid_left = Pin(4, Pin.IN) # brown
-# ir_mid_right = Pin(5, Pin.IN) # white
-ir_front_left = Pin(6, Pin.IN) # orange
-ir_front_centre = Pin(7, Pin.IN) # yellow
-ir_front_right = Pin(8, Pin.IN) # green
-ir_rear_centre = Pin(9, Pin.IN) # blue
-  
-# ------------------------------
-#  Motor speed sensor interface
-# ------------------------------
-# Powerred by 5v bus
-# Requires Logic Level Converter to convert signal to 3.3v (4 channels)
-
-encoder_rear_left = Pin(10, Pin.IN) # light grey
-# encoder_rear_right = Pin(11, Pin.IN) # purple
-# encoder_front_left = Pin(12, Pin.IN) # blue
-encoder_front_right = Pin(13, Pin.IN) # brown
-
-
-# ------------------------
-#  Sonic sensor interface
-# ------------------------
-# Powerred by 5v bus
-# Requires Logic Level Converter to convert echo signal to 3.3v (1)
-
-trigger = Pin(14, Pin.OUT) # brown
-echo = Pin(15, Pin.IN) # white
-
-# -----------------------------------
-#  Motor Controler (L298N) interface
-# -----------------------------------
-
-# Remember to connect Pico GND to L298N GND
-
-# Speed control - PWM
-
-motor_1_pwm = PWM(Pin(16)) # L298N ENA left purple
-motor_1_pwm.freq(50)
-motor_2_pwm = PWM(Pin(17)) # L298N ENB right light grey
-motor_2_pwm.freq(50)
-
-# Direction control
-
-motor_1a = Pin(18, Pin.OUT) # L298N IN4 orange right
-motor_1b = Pin(19, Pin.OUT) # L298N IN3 yellow right
-motor_2a = Pin(20, Pin.OUT) # L298N IN2 green left
-motor_2b = Pin(21, Pin.OUT) # L298N IN1 blue left
+ir_front_left = Pin(10, Pin.IN) # orange
+ir_front_centre = Pin(11, Pin.IN) # yellow
+ir_front_right = Pin(12, Pin.IN) # green
+ir_rear_centre = Pin(13, Pin.IN) # blue
+ir_mid_left = Pin(14, Pin.IN) # purple
+ir_mid_right = Pin(15, Pin.IN) # light grey
 
 # -----------------------
 #  Servo interface - PWM
 # -----------------------
+# Powered by 5v bus of L298N
+# Pico output signal (3.3v), no Logic Level Converter required
 
-servo_pwm = PWM(Pin(22))
+servo_pwm = PWM(Pin(22)) # yellow
 servo_pwm.freq(50)
 
 # ---------------------
@@ -106,10 +118,10 @@ distance = 0
 heading = 0
 current_heading = 0
 detour_heading = 0
-front_left_encoder_count = 0
-front_right_encoder_count = 0
-rear_left_encoder_count = 0
-rear_right_encoder_count = 0
+front_left_wheel_count = 0
+front_right_wheel_count = 0
+rear_left_wheel_count = 0
+rear_right_wheel_count = 0
 
 # =========
 #  Helpers
@@ -172,31 +184,31 @@ def set_target_mode():
 def process_rx():
     pass
 
-# ------------------------------
-#  Speed encoder pulse counters
-# ------------------------------
+# ----------------------
+#  wheel pulse counters
+# ----------------------
 
-def front_left_encoder_counter(pin):
-    global front_left_encoder_count
-    front_left_encoder_count += 1
+def front_left_wheel_counter(pin):
+    global front_left_wheel_count
+    front_left_wheel_count += 1
 
-def front_right_encoder_counter(pin):
-    global front_right_encoder_count
-    front_right_encoder_count += 1
+def front_right_wheel_counter(pin):
+    global front_right_wheel_count
+    front_right_wheel_count += 1
 
-def rear_left_encoder_counter(pin):
-    global rear_left_encoder_count
-    rear_left_encoder_count += 1
-
-def rear_right_encoder_counter(pin):
-    global rear_right_encoder_count
-    rear_right_encoder_count += 1
+# def rear_left_wheel_counter(pin):
+#     global rear_left_wheel_count
+#     rear_left_wheel_count += 1
+# 
+# def rear_right_wheel_counter(pin):    
+#     global rear_right_wheel_count
+#     rear_right_wheel_count += 1
 
 # ---------------------------------
 #  Handlers for obstical detection
 # ---------------------------------
 
-# When an obstical is detected a detour is required6
+# When an obstical is detected a detour is required
 
 def obstical_front_left(pin):
     if (pin.value() == 0):
@@ -259,19 +271,6 @@ def obstical_mid_right(pin):
 # -----------------------------------
 #  Bluetooth Communication Functions
 # -----------------------------------
-
-#     weather_data = {
-#         "temp" : temp,
-#         "humid" : hum,
-#         "baro" : pres
-#     }
-#     weather_data_json = ujson.dumps(weather_data)
-#
-#     time.sleep(8)
-#
-#     LED.value(1)
-#     uart.write(weather_data_json)
-#     LED.value(0)
 
 def send_data(tx_data):
     tx_data_json = ujson.dumps(tx_data)
@@ -349,169 +348,293 @@ def sonic_sense(timer):
         timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
 # -------------------------
-#  Motor Control Functions
+#  Servo Control Functions
 # -------------------------
 
-def stop():
-    print("--- STOP ---")
-    motor_1a.low()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.low()
-
-def forward():
-    print(">>> FORWARD >>>")
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.high()
-    motor_2b.low()
-
-def reverse():
-    print("<<< REVERSE <<<")
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.high()
-
-def turn_left():
-    print("<<< TURN LEFT ---")
-    # Spin Left - right wheels forward & left wheels reverse")
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.low()
-    motor_2b.high()
-
-def turn_right():
-    print("--- TURN RIGHT >>>")
-    # Spin Right - left wheels forward & right wheels reverse")
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.high()
-    motor_2b.low()
-
-def calc_duty(level):
-    # motor operating voltage is 3-6 volt
-    # if 65025 = 6v then 32512.5 should = 3v - 50%
-    # Duty cycle range is 32512
-    # Say speed selection is from 1 to 10, i.e. 10 steps
-    # That is 3251 per step
-    # 1 = 3251 + 32513 = 35764 and 10 = 65023
-    
-    max_duty_cycle = 65025
-    min_duty_cycle = 32513
-    steps = 10
-    l3v3l * 50
-    1 = 50%
-    10 = 100%
-    50 / 10 = 5
-    1 x 5 +45 = 50
-    10 x 5
-    1/10*100 = 10 32512 3251
-    10/10*100= 100 32512 32512 + 32513 = 
-    duty_cycle = (int((max_duty_cycle - min_duty_cycle) / steps) * level) + min_duty_cycle
-    print("Motor duty cycle", duty_cycle)
-    return duty_cycle
-
-def set_duty(motor, duty_level):
-        
-    if power >= 1 and power <= 10:
-
-        duty = calc_duty(duty_level)
-
-        if motor == 'left':
-            motor_1_pwm.duty_u16(duty)
-
-        elif motor == 'right':
-            motor_2_pwm.duty_u16(duty)
-
-        elif motor == 'both':
-            motor_1_pwm.duty_u16(duty)
-            motor_2_pwm.duty_u16(duty)
-
-        else:
-            stop()
-            print("ERROR - Invalid motor selection, stop executed")
-            nav_state = 'stop'
-    else:
-        stop()
-        print("ERROR - Invalid power selection, stop executed")
-        nav_state = 'stop'
-
-# ------------------------
-#  Servo Control Function
-# ------------------------
-
 def cycle_servo():
+    
+    print("Test servo")
 
-    for position in range (800, 8000, 50):
+    for position in range (1150, 8650, 50):
         servo_pwm.duty_u16(position)
         utime.sleep(0.02)
 
-    for position in range (8000, 800, -50): # range(start, stop, step)
+    for position in range (8650, 1150, -50): # range(start, stop, step)
         servo_pwm.duty_u16(position)
         utime.sleep(0.02)
+        
+    angle_servo(90)
+    
+    print("Servo test complete")
 
 def angle_servo(deg):
 
     # Set servo parameter values
     max_deg = 180
     min_deg = 0
-    max_duty = 8000
-    min_duty = 50
+    max_duty = 8650
+    min_duty = 1150
 
     # Calculate PWM Duty Cycle for deg
-    #position = max(min(max_duty, (deg - min_deg) * (max_duty - min_duty) // (max_deg - min_deg) + min_duty), min_duty)
-    position = int((round((max_duty - min_duty) / (max_deg - min_deg),3) * deg)) + min_duty
-
+    position = max(min(max_duty, (deg - min_deg) * (max_duty - min_duty) // (max_deg - min_deg) + min_duty), min_duty)
+   
     print("Position ", position)
 
     # Set the duty cycle of the PWM defined as pwm
     servo_pwm.duty_u16(position)
 
     # Wait for servo to set
-    utime.sleep(2)
+    utime.sleep(0.5)
+
+# -------------------------
+#  Motor Control Functions
+# -------------------------
+
+def stop():
+    print("--- STOP ---")
+    
+    motor_1a.low()
+    motor_1b.low()
+    motor_2a.low()
+    motor_2b.low()
+
+def forward():
+    print(">>> Set FORWARD >>>")
+    motor_1a.low()
+    motor_1b.high()
+    motor_2a.high()
+    motor_2b.low()
+    print ("--- FORWARD set")
+
+def reverse():
+    print("<<< Set REVERSE <<<")
+    
+    motor_1a.high()
+    motor_1b.low()
+    motor_2a.low()
+    motor_2b.high()
+
+def turn_left():
+    # Static left turn - left wheels forward & right wheels reverse
+    print("<<< TURN LEFT ---")
+    
+    set_speed('slow')
+        
+    motor_1a.low()
+    motor_1b.high()
+    motor_2a.low()
+    motor_2b.high()
+
+def turn_right():
+    # Static right turn - left wheels forward & right wheels reverse
+    print("--- TURN RIGHT >>>")
+    
+    set_speed('slow')
+    
+    motor_1a.high()
+    motor_1b.low()
+    motor_2a.high()
+    motor_2b.low()
+    
+def duty_cycle(level):
+    # The motor operating voltage is 3-6 volts
+    # The max duty cycle is 65025, power is on 100% off the cycle, 6v. 
+    # A 50% duty cycle is 32513 rounded, power is on 50% of the time, 3v.
+    levels = 10
+    max_duty = 65025 # 1111111111111111 = 65535?
+    min_duty = 32513
+    duty_range = max_duty - min_duty
+    duty = int((level/levels) * duty_range) + min_duty
+    return duty
+    
+
+def set_speed(speed):
+    # Forward drive speed settings are slow, medium, economy and fast
+    
+    duty = 0
+            
+    if speed == 'slow':
+        duty = duty_cycle(2)
+        
+    elif speed == 'medium':
+        duty = duty_cycle(5)
+        
+    elif speed == 'economy':
+        duty = duty_cycle(8)
+        
+    elif speed == 'full':
+        duty = duty_cycle(10)
+        
+    if duty > 0:
+        motor_1_pwm.duty_u16(duty)
+        motor_2_pwm.duty_u16(duty)
+        print ("--- PWM duty set for required speed")
+        
+    else:
+        print ("*** ERROR - invalid speed ***")
+        
+def fwd_left_curve(speed='medium', turn_rate='gentle'):
+    # A forward drive speed settings are slow, medium, economy and full
+    # Turn can be gentle or sharp
+    # Note that if speed is fast only gentle turns will be executed
+    
+    if speed == 'slow':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(1)
+            right_duty_cycle = duty_cycle(2)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(1)
+            right_duty_cycle = duty_cycle(3)
+        
+    elif speed == 'medium':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(4)
+            right_duty_cycle = duty_cycle(5)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(4)
+            right_duty_cycle = duty_cycle(6)
+            
+    elif speed == 'economy':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(7)
+            right_duty_cycle = duty_cycle(8)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(7)
+            right_duty_cycle = duty_cycle(9)
+            
+    elif speed == 'full':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(9)
+            right_duty_cycle = duty_cycle(10)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(9)
+            right_duty_cycle = duty_cycle(10)
+            
+            print("NOTE - only gentle turns at full speed")
+    
+    motor_1_pwm.duty_u16(left_duty_cycle)
+    motor_2_pwm.duty_u16(right_duty_cycle)
+    
+def fwd_right_curve(speed='medium', turn_rate='gentle'):
+    # A forward drive speed settings are slow, medium, economy and full
+    # Turn can be gentle or sharp
+    # Note that if speed is fast only gentle turns will be executed
+                                      
+    if speed == 'slow':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(1)
+            right_duty_cycle = duty_cycle(2)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(1)
+            right_duty_cycle = duty_cycle(3)
+        
+    elif speed == 'medium':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(4)
+            right_duty_cycle = duty_cycle(5)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(4)
+            right_duty_cycle = duty_cycle(6)
+            
+    elif speed == 'economy':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(7)
+            right_duty_cycle = duty_cycle(8)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(7)
+            right_duty_cycle = duty_cycle(9)
+            
+    elif speed == 'full':
+        
+        if turn_rate == 'gentle':
+            left_duty_cycle = duty_cycle(9)
+            right_duty_cycle = duty_cycle(10)
+            
+        elif turn_rate == 'sharp':
+            left_duty_cycle = duty_cycle(9)
+            right_duty_cycle = duty_cycle(10)
+            
+            print("NOTE - only gentle turns at full speed")
+   
+    motor_1_pwm.duty_u16(right_duty_cycle)
+    motor_2_pwm.duty_u16(left_duty_cycle)
+
+# def set_duty(motor, speed):
+#         
+#     duty = calc_duty(duty_level)
+# 
+#     if motor == 'left':
+#         motor_1_pwm.duty_u16(duty)
+# 
+#     elif motor == 'right':
+#         motor_2_pwm.duty_u16(duty)
+# 
+#     elif motor == 'both':
+#         motor_1_pwm.duty_u16(duty)
+#         motor_2_pwm.duty_u16(duty)
+# 
+#     else:
+#         stop()
+#         print("ERROR - Invalid motor selection, stop executed")
+#         nav_state = 'stop'
 
 # ===============
 #  Drive Control
 # ===============
-
 #
 #  Reset drive distance counters
 #
-def reset_front_left_encoder_counter():
-    global front_left_encoder_count
-    front_left_encoder_count = 0
+def reset_front_left_wheel_counter():
+    global front_left_wheel_count
+    front_left_wheel_count = 0
 
-def reset_front_right_encoder_counter():
-    global front_right_encoder_count
-    front_right_encoder_count = 0
+def reset_front_right_wheel_counter():
+    global front_right_wheel_count
+    front_right_wheel_count = 0
 
-def reset_rear_left_encoder_counter():
-    global rear_left_encoder_count
-    rear_left_encoder_count = 0
+def reset_rear_left_wheel_counter():
+    global rear_left_wheel_count
+    rear_left_wheel_count = 0
 
-def reset_rear_right_encoder_counter():
-    global rear_right_encoder_count
-    rear_right_encoder_count = 0
+def reset_rear_right_wheel_counter():
+    global rear_right_wheel_count
+    rear_right_wheel_count = 0
 
 def calc_click_distance():
-    # wheel diameter in mm
+    # Wheel diameter in mm
     wheel_diameter = 65
-    # speed encoder slots
+    # Encoder slots
     slots = 20
     
     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
     
     distance_per_click = wheel_circumference / (slots)
+    print ("--- Click distance = ", distance_per_click)
     
     return distance_per_click
 
 #
-#  Convert distance (cm) into encoder counts
+#  Convert distance (cm) into slots count
 #
 def calc_clicks(distance_cm):
+    print ("--- Convert distance to clicks")
     distance_mm = distance_cm * 10
     clicks = int(distance_mm / calc_click_distance())
+    print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
     return clicks
 
 #
@@ -535,41 +658,43 @@ def side_sensor_state(side):
 
 def drive_target(target_distance):
     
+    print("--- Start drive to target")
+    
     distance_remaining = 0
     
-    # Turn sonic sensor forward
-    angle_servo(90)
+    # Reset wheel counters
+    reset_front_left_wheel_counter()
+    reset_front_right_wheel_counter()
+    reset_rear_left_wheel_counter()
+    reset_rear_right_wheel_counter()
 
-    # Reset encoder counters
-    reset_front_left_encoder_counter()
-    reset_front_right_encoder_counter()
-    reset_rear_left_encoder_counter()
-    reset_rear_right_encoder_counter()
-
-    # Convert distance into encoder pulses
+    # Convert distance into encoder slots
     clicks = calc_clicks(target_distance)
+        
+    print("--- Distance to target: ", target_distance, " / Clicks: ", clicks)
     
-    print(">>> FORWARD >>>")
-    print("--- Distance: ", target_distance, " / Clicks: ", clicks)
-    
-    level = 80
-    # Set duty
-    set_duty('both', level)
+    # Set speed
+    print ("--- Set speed")
+    speed = "full"
+    set_speed(speed)
+    print ("--- Speed set to ", speed)
     
     # Drive forward
+    print ("--- Start drive to target")
     forward()
     
+    near_target = False
     # Continue forward while clicks counter is less than distance clicks
-    while rear_left_encoder_count < clicks:
-        # Software interrupt - if detour mode is set stop drive
-        # A detour from original couse is required to avoid an obstical
+    while front_left_wheel_count < clicks:
+                        
         if detour_mode:
-            stop()
             print("--- Detour mode set, target drive suspended")
-            
+            # Software interrupt - detour mode has been set, stop target drive
+            stop()
+            # A detour from original couse is required to avoid an obstical
+            # How must of the drive was completed?
             # Calculate average clicks
-            average_clicks = (front_right_encoder_count + rear_left_encoder_count) / 2
-            
+            average_clicks = (front_right_wheel_count + front_left_wheel_count) / 2
             # calculate and record remaining distance to target
             distance_remaining = target_distance - calc_distance(average_clicks)
             break
@@ -582,15 +707,16 @@ def drive_target(target_distance):
         ##############################
         
         # Slow down when 80% complete        
-        if (rear_left_encoder_count / clicks) * 100 == 80 and level > 50:
-            set_power('both', 50)
+        if (front_left_wheel_count / clicks) * 100 > 80 and not near_target:
+            near_target = True
+            set_speed('medium')
             print("--- slow down, almost at target")
 
     # Stop destination reached, counter = clicks
     stop()
 
-    print("==> Front Right Encoder Count: ", front_right_encoder_count)
-    print("==> Rear Left Encoder Count: ", rear_left_encoder_count)
+    print("==> Front Right wheel Count: ", front_right_wheel_count)
+    print("==> Front Left wheel Count: ", front_left_wheel_count)
 
     return distance_remaining
 
@@ -605,15 +731,15 @@ def drive_detour(side, count):
     print("*** Drive detour ***")
     print( ":--> Detour count: ", count)
     
-    # Reset encoder counters to record detour drive distance
-    reset_front_left_encoder_counter()
-    reset_front_right_encoder_counter()
-    reset_rear_left_encoder_counter()
-    reset_rear_right_encoder_counter()
+    # Reset wheel counters to record detour drive distance
+    reset_front_left_wheel_counter()
+    reset_front_right_wheel_counter()
+    reset_rear_left_wheel_counter()
+    reset_rear_right_wheel_counter()
     
     # Slowly drive forward
-    set_power('both', 50)
-    
+    set_speed('slow')
+                                             
     forward()
 
     while target_blocked and count == detour_mode_count:
@@ -670,7 +796,7 @@ def best_detour_angle():
     # To avoid and obstical use the sonic sensor to scan for open space
     # in a 180 degee arc at 10 degree intervals
 
-    # Stop Sonic Scan IRQ Timer
+    # Stop Sonic Scan Timer
     print("--- Stop Timer")
     timer.deinit()
 
@@ -678,14 +804,23 @@ def best_detour_angle():
     scan_angle = -90
     free_distance = 0
     best_distance = 0
+    correction = 10 # the actual scan arc is not 180 on the servo, don't know why
+    
     while scan_arc >= 0:
         angle_servo(scan_arc)
         print("--- scan", scan_angle)
         free_distance = get_distance()
         print("--- Free distance = ", free_distance)
+        
         if free_distance > best_distance:
             best_distance = free_distance
-            best_angle = scan_angle
+            if scan_angle < correction:
+                best_angle = scan_angle + 10
+            elif scan_angle > correction:
+                best_angle = scan_angle - 10
+            else:
+                best_angle = 0 # i.e. forward
+            
         scan_arc -= 10
         scan_angle += 10
     
@@ -694,7 +829,7 @@ def best_detour_angle():
     # set ultra sound sensor to scan forward
     angle_servo(90)
 
-    # Start Sonic Scan IRQ Timer
+    # Start Sonic Scan Timer
     print("--- Start Timer")
     timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
@@ -707,33 +842,34 @@ def turn_to_heading(req_heading):
     req_heading = 90
 
     # Execute turn
+    print ("--- Turn to heading ---")
     current_heading = read_compass()
     if current_heading > req_heading:
         if req_heading < current_heading - 180:
-            turn_right(50)
+            turn_right('slow')
             while read_compass() != req_heading:
                 pass
             stop()
         else:
-            turn_left(50)
+            turn_left('slow')
             while read_compass() != req_heading:
                 pass
             stop()
     elif current_heading < req_heading:
         if req_heading > current_heading + 180:
-            turn_left(50)
+            turn_left('slow')
             while read_compass() != req_heading:
                 pass
             stop()
         else:
-            turn_right(50)
+            turn_right('slow')
             while read_compass() != req_heading:
                 pass
             stop()
     else:
-        print("On course")
+        print("--- On course")
 
-def verify_heading(req_heading, distance_remaining):
+def verify_heading(req_heading, distance_remaining, current_speed):
 
     # This function must be called by drive_target() while driving
     # to verify drive heading. If there is a deviation correct heading
@@ -745,9 +881,24 @@ def verify_heading(req_heading, distance_remaining):
     # dummy code
     heading = read_compass()
     deviance = req_heading - heading
-    if deviance > 1 and distance > 10:
-        stop()
-        turn_to_heading(req_heading)
+    
+    while deviance > 1 and distance > 10:
+        
+        if deviance < 5:
+            speed = current_speed
+            turn = 'gentle'
+            
+        elif deviance > 5:
+            speed = 'slow'
+            turn = 'sharp'
+            
+        if req_heading < heading:
+            fwd_left_turn(speed, turn)
+            
+        elif req_heading > heading:
+            fwd_right_turn(speed, turn)
+    
+    set_speed(current_speed)
 
 def calc_target_position(deviation_angle, detour_distance, target_distance, obstacle_side):
     
@@ -794,12 +945,12 @@ def calc_target_position(deviation_angle, detour_distance, target_distance, obst
         # target distance = distance to target from detour position
         new_target_distance = math.sqrt(target_distance**2 + detour_distance**2 - 2 * target_distance * detour_distance * math.cos(deviation_angle)) 
     
-    print(" :--> Target distance: ", new_target_distance)
+    print(":--> Target distance: ", new_target_distance)
           
     # calc detour position angle
     detour_position_angle = math.acos((new_target_distance**2 + detour_distance**2 - target_distance**2) / (2 * new_target_distance * detour_distance))
     
-    print(" :--> Detour position angle: ", detour_position_angle)
+    print(":--> Detour position angle: ", detour_position_angle)
     
     # turn_angle = the degrees to turn from the current detour heading to
     # new target heading as calculated at the current detour position -
@@ -824,12 +975,12 @@ def calc_target_position(deviation_angle, detour_distance, target_distance, obst
 #         if detour_heading < 0:
 #             new_detour_heading = new_detour_heading + 360
                 
-    print(" :--> Target turn angle: ", target_turn_angle)
+    print(":--> Target turn angle: ", target_turn_angle)
     
     # calc target heading using current compass heading    
     new_target_heading = calc_heading(target_turn_angle)
     
-    print(" :--> New target heading: ", new_target_heading)
+    print(":--> New target heading: ", new_target_heading)
         
         # calc target heading without using compass heading
     #         if detour_angle > 0:
@@ -849,7 +1000,7 @@ def calc_target_position(deviation_angle, detour_distance, target_distance, obst
     
     return target_position
 
-def detour(target_heading, target_distance):
+def do_detour(target_heading, target_distance):
     
     # Current heading to target is blocked, make a detour
     print ('*** Detour Started ***')
@@ -900,7 +1051,7 @@ def detour(target_heading, target_distance):
         #  4. start a new detour
         
         # Calculate average clicks
-        average_clicks = (front_right_encoder_count + rear_left_encoder_count) / 2
+        average_clicks = (front_right_wheel_count + rear_left_wheel_count) / 2
             
         # calculate and record detour distance travelled
         detour_distance = calc_distance(average_clicks)
@@ -926,7 +1077,7 @@ def detour(target_heading, target_distance):
     
     return target_position
 
-def target(target_position):
+def go_target(target_position):
     
     target_heading = target_position['heading']
     target_distance = target_position['distance']
@@ -938,7 +1089,8 @@ def target(target_position):
         # Turn to required heading
         turn_to_heading(target_heading)
 
-        # Drive distance to target
+        # Drive to target
+        print ('=== Drive to target')
         remaining_distance = drive_target(target_distance)
 
         # Process drive outcome:
@@ -946,11 +1098,11 @@ def target(target_position):
             # Obstical encounterred, plan and drive detour
             # Return target position (heading and distance) from the current
             # position, dead reconning detour position of the NavBot
-            new_target_position = detour(target_heading, remaining_distance)
+            new_target_position = do_detour(target_heading, remaining_distance)
             
             if nav_state == "target":
                 print ('*** Detour Successful ***')
-                target_heading = new_target_positon['heading']
+                target_heading = new_target_position['heading']
                 target_distance = new_target_position['distance']
                 global detour_mode_count
                 detour_mode_count = 0
@@ -989,7 +1141,7 @@ def router(route):
             print ("--- Processing leg number: ", leg_count + 1)
             target_data = load_route()
             #target_data = route[leg_count] #=======>
-            target_state = target(target_data)
+            target_state = go_target(target_data)
             #target_state = target(route['heading'], route['distance'])
 
             if target_state == 'complete':
@@ -1026,7 +1178,7 @@ def load_route():
 
     route = {
         "heading" : 90,
-        "distance" : 200
+        "distance" : 400
     }
 
     return route
@@ -1098,40 +1250,51 @@ def main():
 # -------------------------------------
 
 # - Front:
+#ir_front_left.irq(handler=obstical_front_left, trigger=Pin.IRQ_FALLING) # obstacle
 ir_front_left.irq(handler=obstical_front_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+
+#ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING) # obstacle
+#ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_RISING)
 ir_front_centre.irq(handler=obstical_front_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+
+#ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING) # obstacle
 ir_front_right.irq(handler=obstical_front_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
 
 # - Rear:
 ir_rear_centre.irq(handler=obstical_rear_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+#ir_rear_centre.irq(handler=obstical_rear_centre, trigger=Pin.IRQ_FALLING) # obstacle
 
 # - Middle:
-# ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
-# ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING)
+#ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_FALLING) # obstacle
+#ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_FALLING) # obstacle
+#ir_mid_left.irq(handler=obstical_mid_left, trigger=Pin.IRQ_RISING) # no obstacle
+#ir_mid_right.irq(handler=obstical_mid_right, trigger=Pin.IRQ_RISING) # no obstacle
 
-# ------------------------------
-#  Set speed encoder interrupts
-# ------------------------------
+# ----------------------------------
+#  Set wheel turn sensor interrupts
+# ----------------------------------
 
 # - Front
-# encoder_front_left.irq(handler=front_left_encoder_counter, trigger=Pin.IRQ_RISING)
-encoder_front_right.irq(handler=front_right_encoder_counter, trigger=Pin.IRQ_RISING)
+front_left_wheel.irq(handler=front_left_wheel_counter, trigger=Pin.IRQ_RISING)
+front_right_wheel.irq(handler=front_right_wheel_counter, trigger=Pin.IRQ_RISING)
 
 # - Rear
-encoder_rear_left.irq(handler=rear_left_encoder_counter, trigger=Pin.IRQ_RISING)
-# encoder_rear_right.irq(handler=rear_right_encoder_counter, trigger=Pin.IRQ_RISING)
+# rear_left_wheel.irq(handler=rear_left_wheel_counter, trigger=Pin.IRQ_RISING)
+# rear_right_wheel.irq(handler=rear_right_wheel_counter, trigger=Pin.IRQ_RISING)
 
 # ---------------------------------
 #  Configure timer interrupt event
 # ---------------------------------
 
-#timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+# timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
 # -------------------
 #  UART RX interrupt
 # -------------------
 
-#uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
+# uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
 
 # ===================
 #  Execution Control
@@ -1139,6 +1302,7 @@ encoder_rear_left.irq(handler=rear_left_encoder_counter, trigger=Pin.IRQ_RISING)
 try:
     cycle_servo()
     # start main loop
+    print ("--- Starting main loop ---")
     main()
     # test_setup()
     #timer.deinit()
@@ -1148,9 +1312,9 @@ except KeyboardInterrupt:
     # Abort, stop bot
     print ('CTRL-C received, Abort')
     machine.reset()
-    #stop()
+    stop()
 
 # finally:
-#     # Cleanup
-#     # timer.deinit()
+# Cleanup
+    timer.deinit()
 
