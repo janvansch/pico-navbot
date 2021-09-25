@@ -16,6 +16,7 @@ import _thread
 import utime
 import math
 import ujson
+import sys
 
 # ========================
 #  Initialisation Section
@@ -118,18 +119,13 @@ timer = Timer()
 #  Initialise global variables
 # -----------------------------
 
-avg_heading = 0
 second_thread = True
-detour_mode = False
-detour_mode_count = 0
-distance = 0
-heading = 0
-current_heading = 0
-detour_heading = 0
 front_left_motor_count = 0
 front_right_motor_count = 0
 rear_left_motor_count = 0
 rear_right_motor_count = 0
+avg_heading = 0
+obstacle = False
 
 # ------------
 #  Constants:
@@ -192,49 +188,15 @@ def start_heading_monitor():
 def stop_heading_monitor():
     global second_thread
     second_thread = False
+    
+def reset_obstacle():
+    global obstacle
+    obstacle = False
 
 # Navigation state
 
 def switch_nav_mode():
     pass
-
-#     if detour_mode:
-#         global detour_mode
-#         detour_mode = False
-#         print("--- Target mode set!")
-#         global nav_state
-#         nav_state = "target"
-#     else:
-#         global detour_mode
-#         detour_mode = True
-#         print(">>> Detour mode set!")
-#         global nav_state
-#         nav_state = "detour"
-
-def set_detour_mode():
-    global detour_mode_count
-    global detour_mode
-    global nav_state
-    
-    if detour_mode:
-        # If already in detour mode then an obstacle was encountered
-        # in the detour drive heading. Increase counter by 1.
-        # This will suspend the current detour drive.
-        detour_mode_count +=1
-    else:
-        detour_mode_count = 1
-        detour_mode = True
-        print(">>> Detour mode set!")
-        nav_state = "detour"
-
-def set_target_mode():
-    global detour_mode
-    detour_mode = False
-    print("--- Target mode set!")
-    global nav_state
-    nav_state = "target"
-    global detour_mode_count
-    detour_mode_count = 0
 
 def read_raw_data(addr):
     
@@ -286,74 +248,16 @@ def front_right_motor_counter(pin):
 #     global rear_right_motor_count
 #     rear_right_motor_count += 1
 
-# ---------------------------------
-#  Handlers for obstacle detection
-# ---------------------------------
+# ------------------------------------
+#  Handlers for IR obstacle detection
+# ------------------------------------
 
-# When an obstacle is detected set detour mode
+# When an obstacle is detected set obstacle flag
 
 def obstacle(pin):
-    if (pin.value() == 0):
-        stop()
-        led.on()
-        print("*** obstaclee detected")
-        set_detour_mode()
-    else:
-        led.off()
-
-# def obstacle_front_left(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Front Left")
-#         set_detour_mode()
-#     else:
-#         led.off()
-# 
-# def obstacle_front_centre(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Front Center")
-#         set_detour_mode()
-#     else:
-#         led.off()
-# 
-# def obstacle_front_right(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Front Right")
-#         set_detour_mode()
-#     else:
-#         led.off()
-# 
-# def obstacle_rear_centre(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Rear Centre")
-#         set_detour_mode()
-#     else:
-#         led.off()
-
-# def obstacle_mid_left(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Mid left")
-#         set_detour_mode()
-#     else:
-#         led.off()
-# 
-# def obstacle_mid_right(pin):
-#     if (pin.value() == 0):
-#         stop()
-#         led.on()
-#         print("*** obstaclee - Mid Right")
-#         set_detour_mode()
-#     else:
-#         led.off()
+    global obstacle
+    obstacle = True
+    print("*** IRQ source: ", pin)
 
 # ========================
 #  Second Thread Function
@@ -390,7 +294,6 @@ def monitor_heading():
             
         count += 1
         sum_heading_angles = sum_heading_angles + heading_angle
-        
         
         if count == 50:
             
@@ -437,8 +340,8 @@ def get_distance():
     
     #Pause for two milliseconds to ensure the previous setting has completed
     utime.sleep_us(2)
+    
     trigger.high()
-
     # After pulling the high potential,
     # wait for 5 milliseconds,
     # and immediately set to Low
@@ -790,19 +693,11 @@ def calc_distance(clicks):
     distance_cm = distance_mm / 10
     return distance_cm
 
-#
-# Monitor state of target side IR sensor
-#
-def side_sensor_state(side):
-    side_blocked = False
-    return side_blocked
 
-#
-#  Drive on target heading for required distance
-#
-
-def drive_target(target_distance):
-    
+def target_drive(target_distance):
+    #
+    #  Drive on target heading for required distance
+    #
     print("--- Start drive to target")
     
     distance_remaining = 0
@@ -826,26 +721,15 @@ def drive_target(target_distance):
     
     # Drive forward
     print ("--- Drive forward")
-    forward()
-    
+    forward()    
     near_target = False
+    
     # Continue forward while clicks counter is less than distance clicks
     while front_left_motor_count < clicks:
+        
         #print("Heading: ", avg_heading)
         #print("==> Front Right Motor Count: ", front_right_motor_count)
         #print("==> Front Left Motor Count: ", front_left_motor_count)
-                        
-        if detour_mode:
-            print("--- Detour mode set, target drive suspended")
-            # Software interrupt - detour mode has been set, stop target drive
-            stop()
-            # A detour from original couse is required to avoid an obstacle
-            # How must of the drive was completed?
-            # Calculate average clicks
-            average_clicks = (front_right_motor_count + front_left_motor_count) / 2
-            # calculate and record remaining distance to target
-            distance_remaining = target_distance - calc_distance(average_clicks)
-            break
         
         ##############################
         # if course_deviation_right:
@@ -853,14 +737,27 @@ def drive_target(target_distance):
         # if course_deviation_left:
         #     slow_right()
         ##############################
+                        
+        if obstacle:
+            
+            # IRQ - obstacle flag set, stop target drive
+            stop()
+            print("--- Obstacle encountered, target drive suspended")
+            reset_obstacle()
+            
+            # A detour from original couse is required to avoid an obstacle
+            # What is the remaining distance to the target?
+            average_clicks = (front_right_motor_count + front_left_motor_count) / 2
+            distance_remaining = target_distance - calc_distance(average_clicks)
+            break
         
-        # Slow down when 80% complete        
         if (front_left_motor_count / clicks) * 100 > 80.0 and not near_target:
+            # Slow down when 80% complete  
             near_target = True
             set_speed('medium')
             print("--- slow down, almost at target")
 
-    # Stop destination reached, counter = clicks
+    # Destination reached, counter = clicks, stop
     stop()
 
     print("==> Front Right Motor Count: ", front_right_motor_count)
@@ -868,7 +765,7 @@ def drive_target(target_distance):
 
     return distance_remaining
 
-def drive_detour(side, count):
+def detour_drive(side):
     # If the bot made a turn to the right the target is on the left.
     # Drive untill the left side is not blocked.
     # If the bot made a turn to the left the target is on the right.
@@ -876,9 +773,8 @@ def drive_detour(side, count):
     
     target_blocked = True
 
-    print("*** Drive detour ***")
-    print( ":--> Detour count: ", count)
-    
+    print("*** Detour Drive Started ***")
+        
     # Reset motor counters to record detour drive distance
     reset_front_left_motor_counter()
     reset_front_right_motor_counter()
@@ -890,22 +786,32 @@ def drive_detour(side, count):
                                              
     forward()
 
-    while target_blocked and count == detour_mode_count:
-        # If the detour count increases it means an obstacle was encountered
-        # in the detour route. Stop current detour drive
-        if detour_mode_count != count:
-            # An obstacle event was triggered during a detour drive
+    while target_blocked:
+        
+        if obstacle:
+            # IRQ - obstacle flag set, stop detour drive
+            # Another detour required to avoid an obstacle
+            print("--- Obstacle encountered, suspend current detour")
+            reset_obstacle()
+            
             break
         
-        # Code must be inserted here to read the state of the relevant side
-        # sensor. IRQ event? maybe not this ia a small loop
-        # target_blocked = side_sensor_state(side)
+        # Read side sensor state
+        # Sensor output:
+        #   0 = low, obstacle
+        #   1 = high, no obstacle (5v on sensor line)
         
-    utime.sleep(10)
+        if side == "left" and ir_mid_left.value() == 1:
+            target_blocked = False
+            
+        if side == "right" and ir_mid_right.value() == 1:
+            target_blocked = False    
+        
     stop()
-    
+    # Record distance travelled on detour
+    distance = (front_right_motor_count + front_left_motor_count) / 2
+        
     return target_blocked
-    
 
 # ====================
 #  Navigation Control
@@ -923,9 +829,7 @@ def read_compass():
 #     new_target_distance = 100
 #     return new_target_distance
 
-
-
-def calc_heading(turn_angle):
+def detour_heading(turn_angle):
     
     # Read current compass heading
     current_heading = read_compass()
@@ -1050,7 +954,7 @@ def verify_heading(req_heading, distance_remaining, current_speed):
     
     set_speed(current_speed)
 
-def calc_target_position(deviation_angle, detour_distance, target_distance, obstacle_side):
+def target_position(deviation_angle, detour_distance, target_distance, obstacle_side):
     
     # a) Calculate target position (heading & distance) from current position.
     #    This will be the new dead reconning point.
@@ -1150,218 +1054,205 @@ def calc_target_position(deviation_angle, detour_distance, target_distance, obst
     
     return target_position
 
-def do_detour(target_heading, target_distance):
+def detour(target_heading, target_distance):
     
-    # Current heading to target is blocked, make a detour
     print ('*** Detour Started ***')
+    # Plan and drive detour
+    target_blocked = True
     
-    while detour_mode:
-    
-        # Determine turn angle with best free distance
-        # if turn angle > 0 turn right else turn to the left
+    while target_blocked:
+               
+        # Determine direction with best free distance
+        # if detour angle > 0 turn right else turn to the left
         detour_angle = best_detour_angle()
-        # the deviation angle = the detour angle
+        # course deviation angle = the detour angle
         
         # Determine detour heading, current heading + detour angle
         # Use compass to determine current heading
-        detour_heading = calc_heading(detour_angle)
+        heading = detour_heading(detour_angle)
         
-        print(" :--> Detour heading: ", detour_heading)
+        print(" :--> Detour heading: ", heading)
         
-        turn_to_heading(detour_heading)
+        turn_to_heading(heading)
         
-        # deviation_angle = target_turn_angle + detour_angle
-        # deviation angle is detour heading minus current target heading
         deviation_angle = detour_heading - target_heading
         # The angle by which the detour deviates from the target's heading
-        # This angle is required to calculate the distance to target using
-        # Cosine Rule when calculating target position after detour
+        # This angle is required to calculate the distance to target using the Cosine rule
         
         print( ":--> Deviation angle: ", deviation_angle)
         
         # Determine obstacle side
         if detour_angle > 0:
-            # turning right, obstacle on left
-            obstacle_side = "left"
+            # turning right, target would be to the left
+            target_side = "left"
         else:
-            # turning left, obstacle 
-            obstacle_side = "right"
+            # turning left, target would be to the right 
+            target_side = "right"
         
-        print( ":--> Obstacle side: ", obstacle_side)
+        print( ":--> Target side: ", target_side)
         
-        # Drive detour heading
-        target_blocked = drive_detour(obstacle_side, detour_mode_count)
-        # If the detour drive ends and the target direction is still blocked an
-        # obstacle interrupt was triggered during the detour drive.
-            
-        # What happens when an obstacle is encountered in a detour drive?
-        #  1. detour_mode_count is incremented
-        #  2. this will stop current detour
-        #  3. new dead reconning point is calculated
-        #  4. start a new detour
+        # Drive on detour heading
+        target_blocked = drive_detour(target_side)
         
-        # Calculate average clicks
+        # If the detour drive ends and the target side is still blocked an
+        # obstacle was encountered during the detour drive.
+        # Calculate a new target heading and start a new detour
+        
+        # Calculate average clicks recorded during detour drive
         average_clicks = (front_right_motor_count + rear_left_wheel_count) / 2
             
-        # calculate and record detour distance travelled
+        # calculate distance travelled during detour
         detour_distance = calc_distance(average_clicks)
         
         print( ":--> Detour distance: ", detour_distance)
-        
+                
+        target_position = target_position(deviation_angle, detour_distance, target_distance, obstacle_side)
         # At the current detour location of the NavBot what is the heading and
         # distance to the target? If the detour was successful this will be the
         # target position information used to drive to the target. If not this
         # will be the dead reconning point form which the next detour drive will
         # start
-        target_position = calc_target_position(deviation_angle, detour_distance, target_distance, obstacle_side)
         
         target_heading = target_position['heading']    
         target_distance = target_position['distance']
         
-        print( ":--> Target heading: ", target_heading, " and distance: ", target_distance)
+        print( ":--> New target heading: ", target_heading, " and distance: ", target_distance)
             
-        if (not target_blocked):
-            set_target_mode()
-    
-    # obstacle avoided, start driving towards target        
+    print( "---> Detour avoided, resume drive to target")    
     
     return target_position
 
-def go_target(target_position):
+def drive_leg(target):
     
-    target_heading = target_position['heading']
-    target_distance = target_position['distance']
+    heading = target['heading']
+    distance = target['distance']
     
-    target_state = "executing"
-
-    while target_state == "executing":
+    while distance > 0:
 
         # Turn to required heading
         print("=== Current heading: ", avg_heading)
-        turn_to_heading(target_heading)
+        turn_to_heading(heading)
 
         # Drive to target
-        #print ('=== Drive to target')
-        remaining_distance = drive_target(target_distance)
-
-        # Process drive outcome:
-        if nav_state == "detour":
-            # obstacle encounterred, plan and drive detour
-            # Return target position (heading and distance) from the current
-            # position, dead reconning detour position of the NavBot
-            new_target_position = do_detour(target_heading, remaining_distance)
+        print ('=== Drive to target')
+        distance = target_drive(distance)
+        
+        
+        if distance > 0:
+            # If distance is greater than zero the target was not reached
+            # because an obstacle was encountered. A detour is required.
             
-            if nav_state == "target":
-                print ('*** Detour Successful ***')
-                target_heading = new_target_position['heading']
-                target_distance = new_target_position['distance']
-                global detour_mode_count
-                detour_mode_count = 0
-                
-            elif nav_state == "stop":
-                print ('*** Detour Unsuccessful ***')
-                target_state = "halt"
-                
+            print( ":--> Target direction obstructed, detour required")
+            
+            new_target = detour(heading, distance)
+            
+            heading = new_target['heading']
+            distance = new_target['distance']
+            
         else:
             print ('*** Target Reached ***')
-            target_state = 'complete'
+            leg_state = 'complete'
 
-    return target_state
-
-# ==================
-#  Route Definition
-# ==================
-
-# The definition of a route. A route has one or more legs
-# A leg is defined as a heading and a distance
-# A route can be in one of four states:
-# - Tracking : driving on a heading towards the target
-# - Detour : driving on a heading that is off target to avoid an obstacle
-# - Suspended: stopped can't find a way to the target; waiting for operator input
-# - Complete: arrived at calculated target point; waiting for operator input
-
-def router(route):
-    # For each way point in the route extract heading & distance data as drive targets
-    print ("--- Router Started")
-    legs_in_route = 1 # for testing
-
-    if legs_in_route > 0:
-        leg_count = 0
-        route_state = 'executing'
-        while route_state == 'executing':
-            #print ("--- Processing leg number: ", leg_count + 1)
-            target_data = load_route()
-            #target_data = route[leg_count] #=======>
-            target_state = go_target(target_data)
-            #target_state = target(route['heading'], route['distance'])
-
-            if target_state == 'complete':
-                leg_count +=1
-                print ("--- Completed: ", leg_count)
-
-                if leg_count >= legs_in_route:
-                    route_state = 'complete'
-
-            elif target_state == 'halt':
-                print ("*** HALT - could not reach leg target")
-                route_state = 'halt'
-
-            else:
-                print ("*** ERROR - Target() returned invalid state")
-    else:
-        print ("*** HALT - No route information")
-        route_state = 'halt'
-
-    return route_state
+    return leg_state
 
 def manual_ctrl():
     pass
 
-def main():
-    # while not start:
-    #    drive_data = read_bluetooth()
-    # drive_data would contain the navigation mode and route definition if mode is auto
-        
-        
-    # The navigation mode will be specified in the control data received.
-    # Navigation mode can either be "auto" (program control) or "manual" (joystick control)
-    # Currently only auto mode has been implemented 
-    nav_mode = 'auto'
-    
-    # The route information will be specified in the control data received
-    # A route contains one or more legs or waypoints
-    
-    # The following creates a route with one leg for test purposes
-    route = []
-    leg = {
-        "heading" : 90,
-        "distance" : 400
-    }
-    route.append(leg)
-    
-    if mode == 'auto':
-        # Self navigation mode selected
-        print ('*** Self Navigation Mode Selected ***')
+def connect():
+    pass
 
-        # Set Navigation State
-        global nav_state
-        nav_state = "target"
+def request(param):
+    # In the future this will be replaced with code that obtains
+    # the information from the command module
+    
+    # option two would be that the command module sends the information
+    # after establishing connecting with NavBot
+    
+    received = False
+    
+    while not received:
+        if param == "mode":
+            param_val = "auto"
+            received = True
+            
+        elif param == "route":
+            # The route information will be specified in the control data received
+            # A route contains one or more legs or waypoints
+    
+            # The following creates a dummy route with one leg for test purposes
+            route = []
+            leg = {
+                "heading" : 90,
+                "distance" : 400
+            }
+            route.append(leg)
+            param_val = route
+            received = True
+    
+        elif param == "start":
+            param_val = "go"
+            received = True
+        
+    return param_val
+
+def main():
+    
+    # The Plan:
+    # When NavBat starts up it will connect to Raspberry Pi running the control GUI.
+    # Then it will wait for instructions.
+    # The first instruction will set the operating mode.
+    # This would be either "auto" or "manual".
+    # If "auto" then NavBot will wait for route data. A route will consist of one or 
+    # more legs which consists of a heading and a distance.
+    # Once the nav data has been received the NavBot will wait for the start command to
+    # start driving the route as specified.
+    # If "manual" then NavBot will wait for joystick input from the user. This input
+    # could be either forward, turn left, turn right or reverse. NavBot will report
+    # if it encounters obstacles.
+    
+    print ('*** Main START ***')
+    
+    connect()
+    print('--- Connected')
+    
+    nav_mode = request("mode")
+    print('--- Mode set')
+    
+    if nav_mode == "auto":
+        
+        route = request("route")
+        print('--- Route data received')
+        
+        start = request("start")
+        print('--- Start received')
+        
+        # if start = "abort":
+        # throw exception
+
+        # Self navigation mode selected
+        print ('*** Self Navigation Mode Started ***')
 
         # Start executing route
-        route_state = router(route)
+        leg_count = 0
+        for leg in route:
+            leg_count += 1
+            print('--- Leg: ', leg_count)
+            leg_state = drive_leg(leg)
 
-        # Process route result
-        if route_state == "complete":
-            print ('*** Route Completed ***')
+            # Process leg result
+            if leg_state == "complete":
+                print ('*** Leg Complete ***')
 
-        elif route_state == "halt":
-            print ('*** Failed to reach objective ***')
+            elif leg_state == "halt":
+                print ('*** Failed to reach objective ***')
+                break
 
-        else:
-            print ('*** ERROR - unexpected end to route ***')
+            else:
+                print ('*** ERROR - unexpected end to route ***')
+                break
 
     # Manual control selected
-    elif mode == "manual":
+    elif nav_mode == "manual":
         print ('*** Manual Navigation Mode Selected ***')
         manual_ctrl()
 
@@ -1374,40 +1265,11 @@ def main():
 # -------------------------------------
 #  Setup IR obstacle sensor interrupts
 # -------------------------------------
-# Front -
+# Monitor front obstacle sensors only. The mid sensors are monitored during
+# a detour drive and the rear sensors will be monitored when reversing
 ir_front_left.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
 ir_front_centre.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
 ir_front_right.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-
-# Rear -
-ir_rear_centre.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
- 
-# Middle -
-ir_mid_left.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-ir_mid_right.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-
-# # Front -
-# ir_front_left.irq(handler=obstacle_front_left, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# #ir_front_left.irq(handler=obstacle_front_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# 
-# ir_front_centre.irq(handler=obstacle_front_centre, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# #ir_front_centre.irq(handler=obstacle_front_centre, trigger=Pin.IRQ_RISING, hard=True)
-# #ir_front_centre.irq(handler=obstacle_front_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# 
-# ir_front_right.irq(handler=obstacle_front_right, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# # ir_front_right.irq(handler=obstacle_front_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# 
-# # Rear -
-# #ir_rear_centre.irq(handler=obstacle_rear_centre, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# ir_rear_centre.irq(handler=obstacle_rear_centre, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# 
-# # Middle -
-# #ir_mid_left.irq(handler=obstacle_mid_left, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# #ir_mid_right.irq(handler=obstacle_mid_right, trigger=Pin.IRQ_FALLING|Pin.IRQ_RISING, hard=True)
-# ir_mid_left.irq(handler=obstacle_mid_left, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# ir_mid_right.irq(handler=obstacle_mid_right, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-# #ir_mid_left.irq(handler=obstacle_mid_left, trigger=Pin.IRQ_RISING, hard=True) # no obstacle
-# #ir_mid_right.irq(handler=obstacle_mid_right, trigger=Pin.IRQ_RISING, hard=True) # no obstacle
 
 # ----------------------------------
 #  Set motor turn sensor interrupts
@@ -1436,50 +1298,54 @@ front_right_motor.irq(handler=front_right_motor_counter, trigger=Pin.IRQ_RISING,
 # ===================
 #  Execution Control
 # ===================
-def navbotMain():
-    try:
-        # Start reading compass to monitor heading 
-        start_heading_monitor()
-        # Test servo
-        cycle_servo()
-        # Configure timer interrupt event for sonic sensor
-        timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-        print('--- Sonic timer set')
-        utime.sleep(5)
-        # Start main loop
-        main()
-        print('*** Main Loop Complete ***')
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
+#def navbotInit():
+try:
+    # Start reading compass to monitor heading 
+    start_heading_monitor()
+    print('--- Heading monitor started')
+    utime.sleep(1)
+    print('--- Heading: ', avg_heading)
+    # Test servo
+    cycle_servo()
+    # Configure timer interrupt event for sonic sensor
+    timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    print('--- Sonic timer started')
+    utime.sleep(5)
+    # Start main loop
+    print('*** Start Main Loop ***')
+    main()
+    print('*** Main Loop Complete ***')
+    timer.deinit()
+    stop_heading_monitor()
+    sys.exit()
 
-    except KeyboardInterrupt:
-        # Abort, stop motors
-        stop()
-        print('CTRL-C received, Abort')
-        print ('*** Reset ***')
-        timer.deinit()
-        stop_heading_monitor()
-        machine.reset()
+except KeyboardInterrupt:
+    # Abort, stop motors
+    stop()
+    print('CTRL-C received, Abort')
+    print ('*** Reset ***')
+    timer.deinit()
+    stop_heading_monitor()
+    machine.reset()
 
-    except Exception as ex:
-        # Exception, stop motors
-        stop()
-        print('An exception as occurred!')
-        print(ex)
-        print('*** End Execution ***')
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
+except Exception as ex:
+    # Exception, stop motors
+    stop()
+    print('An exception as occurred!')
+    print(ex)
+    print('*** End Execution ***')
+    timer.deinit()
+    stop_heading_monitor()
+    sys.exit()
 
-    except:
-        # Exception, stop motors
-        stop()
-        print('An error has occurred.')
+except:
+    # Exception, stop motors
+    stop()
+    print('An error has occurred.')
 
-    finally:
-        # Cleanup, stop motors
-        stop()
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
+finally:
+    # Cleanup, stop motors
+    stop()
+    timer.deinit()
+    stop_heading_monitor()
+    sys.exit()
