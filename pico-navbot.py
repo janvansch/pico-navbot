@@ -66,8 +66,8 @@ echo = Pin(5, Pin.IN) # white
 
 front_left_motor = Pin(6, Pin.IN) #  blue	
 front_right_motor = Pin(7, Pin.IN) # dark purple
-#rear_left_motor = Pin(8, Pin.IN) # grey
-#rear_right_motor = Pin(9, Pin.IN) # white
+rear_left_motor = Pin(8, Pin.IN) # white
+rear_right_motor = Pin(9, Pin.IN) # grey
 
 # ---------------------
 #  IR sensor interface
@@ -240,13 +240,13 @@ def front_right_motor_counter(pin):
     global front_right_motor_count
     front_right_motor_count += 1
 
-# def rear_left_motor_counter(pin):
-#     global rear_left_motor_count
-#     rear_left_motor_count += 1
-# 
-# def rear_right_motor_counter(pin):    
-#     global rear_right_motor_count
-#     rear_right_motor_count += 1
+def rear_left_motor_counter(pin):
+    global rear_left_motor_count
+    rear_left_motor_count += 1
+
+def rear_right_motor_counter(pin):    
+    global rear_right_motor_count
+    rear_right_motor_count += 1
 
 # ------------------------------------
 #  Handlers for IR obstacle detection
@@ -1280,8 +1280,8 @@ front_left_motor.irq(handler=front_left_motor_counter, trigger=Pin.IRQ_RISING, h
 front_right_motor.irq(handler=front_right_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
 
 # - Rear
-# rear_left_motor.irq(handler=rear_left_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
-# rear_right_motor.irq(handler=rear_right_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
+rear_left_motor.irq(handler=rear_left_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
+rear_right_motor.irq(handler=rear_right_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
 
 # ---------------------------------
 #  Configure timer interrupt event
