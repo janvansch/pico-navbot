@@ -1298,54 +1298,54 @@ rear_right_motor.irq(handler=rear_right_motor_counter, trigger=Pin.IRQ_RISING, h
 # ===================
 #  Execution Control
 # ===================
-#def navbotInit():
-try:
-    # Start reading compass to monitor heading 
-    start_heading_monitor()
-    print('--- Heading monitor started')
-    utime.sleep(1)
-    print('--- Heading: ', avg_heading)
-    # Test servo
-    cycle_servo()
-    # Configure timer interrupt event for sonic sensor
-    timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-    print('--- Sonic timer started')
-    utime.sleep(5)
-    # Start main loop
-    print('*** Start Main Loop ***')
-    main()
-    print('*** Main Loop Complete ***')
-    timer.deinit()
-    stop_heading_monitor()
-    sys.exit()
+def navbotMain():
+    try:
+        # Start reading compass to monitor heading 
+        start_heading_monitor()
+        print('--- Heading monitor started')
+        utime.sleep(1)
+        print('--- Heading: ', avg_heading)
+        # Test servo
+        cycle_servo()
+        # Configure timer interrupt event for sonic sensor
+        timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+        print('--- Sonic timer started')
+        utime.sleep(5)
+        # Start main loop
+        print('*** Start Main Loop ***')
+        main()
+        print('*** Main Loop Complete ***')
+        timer.deinit()
+        stop_heading_monitor()
+        sys.exit()
 
-except KeyboardInterrupt:
-    # Abort, stop motors
-    stop()
-    print('CTRL-C received, Abort')
-    print ('*** Reset ***')
-    timer.deinit()
-    stop_heading_monitor()
-    machine.reset()
+    except KeyboardInterrupt:
+        # Abort, stop motors
+        stop()
+        print('CTRL-C received, Abort')
+        print ('*** Reset ***')
+        timer.deinit()
+        stop_heading_monitor()
+        machine.reset()
 
-except Exception as ex:
-    # Exception, stop motors
-    stop()
-    print('An exception as occurred!')
-    print(ex)
-    print('*** End Execution ***')
-    timer.deinit()
-    stop_heading_monitor()
-    sys.exit()
+    except Exception as ex:
+        # Exception, stop motors
+        stop()
+        print('An exception as occurred!')
+        print(ex)
+        print('*** End Execution ***')
+        timer.deinit()
+        stop_heading_monitor()
+        sys.exit()
 
-except:
-    # Exception, stop motors
-    stop()
-    print('An error has occurred.')
+    except:
+        # Exception, stop motors
+        stop()
+        print('An error has occurred.')
 
-finally:
-    # Cleanup, stop motors
-    stop()
-    timer.deinit()
-    stop_heading_monitor()
-    sys.exit()
+    finally:
+        # Cleanup, stop motors
+        stop()
+        timer.deinit()
+        stop_heading_monitor()
+        sys.exit()
