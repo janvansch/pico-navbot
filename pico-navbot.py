@@ -1,12 +1,15 @@
 # Import Modules:
-from machine import Pin, PWM, Timer
+
+from machine import Pin, PWM, Timer, UART
 import utime
+import ujson
 
 # ------------------------
 #  Initialisation Section
 # ------------------------
 
 # Initialise some global variables
+
 distance = 0
 front_left_encoder_count = 0
 front_right_encoder_count = 0
@@ -14,32 +17,24 @@ rear_left_encoder_count = 0
 rear_right_encoder_count = 0
 
 # Onboard LED object
+
 led = Pin(25, Pin.OUT)
 
-# Define timer object
-timer = Timer()
+# UART communication channel for Bluetooth module
 
-# Setup PWM object for servo
-pwm = PWM(Pin(16))
-pwm.freq(50)
-
-# UART communication with Bluetooth module
 # Connect GP0 (UART0 Tx) to Rx of HC-05/06 Bluetooth module (brown)
 # Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (white)
 # Create UART object connect to UART channel 0 at a baud rate of 9600
 uart = UART(0, 9600)
 
 # IR sensor interface
-ir_front_left = Pin(5, Pin.IN) # orange
-ir_front_centre = Pin(4, Pin.IN) # yellow
-ir_front_right = Pin(3, Pin.IN) # green
-ir_rear_centre = Pin(2, Pin.IN) # blue
-# ir_mid_left = Pin(7, Pin.IN) # light grey
-# ir_mid_right = Pin(6, Pin.IN) # purple
 
-# Sonic sensor interface 
-trigger = Pin(14, Pin.OUT)
-echo = Pin(15, Pin.IN)
+# ir_mid_left = Pin(4, Pin.IN) # light grey
+# ir_mid_right = Pin(5, Pin.IN) # purple
+ir_front_left = Pin(6, Pin.IN) # orange
+ir_front_centre = Pin(7, Pin.IN) # yellow
+ir_front_right = Pin(8, Pin.IN) # green
+ir_rear_centre = Pin(9, Pin.IN) # blue
 
 # Motor speed encoder interface
 # encoder_front_left = Pin(10, Pin.IN) # blue
@@ -47,18 +42,65 @@ encoder_front_right = Pin(11, Pin.IN) # brown
 encoder_rear_left = Pin(12, Pin.IN) # white
 # encoder_rear_right = Pin(13, Pin.IN) # purple
 
+# Sonic sensor interface 
+
+trigger = Pin(14, Pin.OUT)
+echo = Pin(15, Pin.IN)
+
+# Servo PWM interface
+
+pwm = PWM(Pin(16))
+pwm.freq(50)
+
 # Motor control interface 
+
 motor_1a = Pin(18, Pin.OUT) # L298N IN4 orange
 motor_1b = Pin(19, Pin.OUT) # L298N IN3 yellow
 motor_2a = Pin(20, Pin.OUT) # L298N IN2 green
 motor_2b = Pin(21, Pin.OUT) # L298N IN1 blue
 # Remember to connect Pico GND to L298N GND
 
-# ---------------------------------------
-#  Interrupt Handlers Definition Section
-# ---------------------------------------
+# Define timer object
+timer = Timer()
+
+# -------------------------
+#  Bluetooth Communication
+# -------------------------
+
+#     weather_data = {
+#         "temp" : temp,
+#         "humid" : hum,
+#         "baro" : pres
+#     }
+#     weather_data_json = ujson.dumps(weather_data)
+#     
+#     time.sleep(8)
+#     
+#     LED.value(1)
+#     uart.write(weather_data_json)
+#     LED.value(0)
+
+def send_data(tx_data):
+    tx_data_json = ujson.dumps(tx_data)
+    uart.write(tx_data_json)
+
+def receive_data():
+    data = uart.readline()
+    return data
+
+# --------------------
+#  Interrupt Handlers 
+# --------------------
+
 #
-# Define speed interrupt handlers
+# Process data received on UART-0 channel received dataprocess_rx,
+#
+
+def process_rx():
+    pass
+
+#
+# Speed encoder pulse counters
 #
 
 def front_left_encoder_counter(pin):
@@ -78,7 +120,7 @@ def rear_right_encoder_counter(pin):
     rear_right_encoder_count += 1
 
 #
-# Define obstical interrupt handlers
+# Handlers for obstical detection
 #
 
 def obstical_front_left(pin):
@@ -135,9 +177,9 @@ def obstical_mid_right(pin):
     else:
         led.off()
 
-# -------------------------
-#  Servo Control Utilities
-# -------------------------
+# ---------------
+#  Servo Control
+# ---------------
 
 def setServoCycle():
     for position in range (800, 8000, 50):
@@ -148,9 +190,14 @@ def setServoCycle():
         pwm.duty_u16(position)
         utime.sleep(0.01)
 
-# -------------------------   
-#  Motor Control Utilities
-# -------------------------
+def angle_servo(degrees):
+    position = max(min(9000, (degrees - 0) * (9000 - 1000) // (180 - 0) + 1000), 1000)
+    pwm.duty_u16(position)
+    utime.sleep(0.01)
+
+# ---------------   
+#  Motor Control
+# ---------------
 
 def stop():
     print("### Full Stop")
@@ -188,9 +235,10 @@ def right():
     motor_2a.high()
     motor_2b.low()
 
-# -----------------------------------
-# Sonic Obstical Avoidance Utilities
-# -----------------------------------
+# -----------------------
+# Sonic Sensor Functions
+# -----------------------
+
 def get_distance():
     global distance
     #Pause for two milliseconds to ensure the previous setting has completed 
@@ -227,6 +275,8 @@ def sonic_sense(timer):
     # Determine current free distance
     distance = get_distance()
     print('---> Sensor distance is： ', distance, 'cm')
+    tx_data = { "distance" : distance }
+    send_data(tx_data)
     # If free distance is limited stop
     if distance < 5:
         stop()
@@ -246,17 +296,21 @@ def sonic_sense(timer):
         timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
 # ------------------------
-#  Move Control Utilities
+#  Move Control Functions
 # ------------------------
+
 def reset_front_left_encoder_counter():
     global front_left_encoder_count
     front_left_encoder_count = 0
+
 def reset_front_right_encoder_counter():
     global front_right_encoder_count
     front_right_encoder_count = 0
+
 def reset_rear_left_encoder_counter():
     global rear_left_encoder_count
     rear_left_encoder_count = 0
+
 def reset_rear_right_encoder_counter():
     global rear_right_encoder_count
     rear_right_encoder_count = 0
@@ -309,6 +363,9 @@ def main():
     run_time = 2
     stop_time = .5
     count = 1
+    
+    angle_servo(90)
+        
     while run:
         led.off()
         # Forward Test (move_forward(distance in cm) and stop
@@ -362,10 +419,16 @@ encoder_front_right.irq(handler=front_right_encoder_counter, trigger=Pin.IRQ_RIS
 # - Rear
 encoder_rear_left.irq(handler=rear_left_encoder_counter, trigger=Pin.IRQ_RISING)
 # encoder_rear_right.irq(handler=rear_right_encoder_counter, trigger=Pin.IRQ_RISING)
+
 #
 # Configure timer interrupt event
 #
 timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+
+#
+# UART RX interrupt
+#
+#uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
 
 # -------------------
 #  Execution Control
