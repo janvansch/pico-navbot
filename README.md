@@ -10,5 +10,5 @@ Now the code for the navigation must be written and tested.
 
 Then field testing to see if the concept and implementation actually works :)
 
-![Testing](../main/images/Planning.png, "Planning")
+![Testing](../main/images/Planning.png "Planning")
 
