@@ -8,9 +8,7 @@ I have now finnally sourced all the basic components and completed the build. I 
 
 Now the code for the navigation must be written and tested.
 
-Then field testing to see if the concept actually works :)
+Then field testing to see if the concept and implementation actually works :)
 
-![Testing](https://github.com/janvansch/pico-navbot/blob/main/images/Testing.JPG)
-
-![Testing](../main/images/Layout_Improved.JPG)
+![Testing](../main/images/Planning.png "Planning")
 
