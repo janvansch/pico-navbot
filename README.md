@@ -10,7 +10,7 @@ Now the code for the navigation must be written and tested.
 
 Then field testing to see if the concept actually works :)
 
-![Testing](https://github.com/janvansch/pico-navbot/blob/main/images/Testing.JPG)
+![Testing](https://github.com/janvansch/pico-navbot/blob/main/images/Planning.png)
 
-![Testing](../main/images/Layout_Improved.JPG)
+![Testing](../main/images/Planning.JPG)
 
