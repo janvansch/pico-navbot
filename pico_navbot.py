@@ -89,16 +89,16 @@ ir_mid_right = Pin(15, Pin.IN) # light grey
 # Pico output signal (3.3v), no Logic Level Converter required
 
 # Speed control - PWM
-motor_1_pwm = PWM(Pin(16)) # L298N ENA blue left
-motor_1_pwm.freq(50)
-motor_2_pwm = PWM(Pin(17)) # L298N ENB brown right
-motor_2_pwm.freq(50)
+left_pwm = PWM(Pin(16)) # L298N ENA blue left 
+left_pwm.freq(50) # below 100Hz recommended for best performance
+right_pwm = PWM(Pin(17)) # L298N ENB brown right
+right_pwm.freq(50)
 
 # Forward & reverse control
-motor_1a = Pin(18, Pin.OUT) # L298N IN4 red right
-motor_1b = Pin(19, Pin.OUT) # L298N IN3 orange right
-motor_2a = Pin(20, Pin.OUT) # L298N IN2 yellow left
-motor_2b = Pin(21, Pin.OUT) # L298N IN1 green left
+right_reverse = Pin(18, Pin.OUT) # L298N IN4 red right reverse
+right_forward = Pin(19, Pin.OUT) # L298N IN3 orange right forward
+left_forward = Pin(20, Pin.OUT) # L298N IN2 yellow left forward
+left_reverse = Pin(21, Pin.OUT) # L298N IN1 green left reverse
 
 # -----------------------
 #  Servo interface - PWM
@@ -118,6 +118,11 @@ timer = Timer()
 # -----------------------------
 #  Initialise global variables
 # -----------------------------
+
+# Note:
+# Variables declared outside of a function is global by default.
+# Variables declared inside a function is local by default.
+# Use the "global" keyword to read and write a global variable inside a function.
 
 second_thread = True
 front_left_motor_count = 0
@@ -233,7 +238,7 @@ def process_rx():
 # -------------------------------------
 
 def front_left_motor_counter(pin):
-    global front_left_motor_count
+    global front_left_motor_count 
     front_left_motor_count += 1
 
 def front_right_motor_counter(pin):
@@ -318,13 +323,30 @@ def monitor_heading():
 #  Bluetooth Communication Functions
 # -----------------------------------
 
+# nav_data = {
+#     "leg_num" : leg,
+#     "leg_heading" : leg_heading,
+#     "leg_distance" : leg_distance,
+#     "nav_status" : nav_status,
+#     "heading : avg_heading             ok
+#     "travel_dist" : distance,          ok
+#     "remaining" : dist_remaining,
+#     "lf_count" : lf_count,
+#     "rf_count" : rf_count,
+#     "lr_count" : lr_count,
+#     "rr_count" : rr_count,
+#     "sonic_dist : sonic_dist
+# }
+
+# bt_data = ujson.dumps(nav_data)
+
 def send_data(tx_data):
     tx_data_json = ujson.dumps(tx_data)
     uart.write(tx_data_json)
 
 def receive_data():
-    data = uart.readline()
-    return data
+    rx_data = uart.readline()
+    return rx_data
 
 # ------------------------
 #  Sonic Sensor Functions
@@ -401,7 +423,7 @@ def cycle_servo():
     
     print("--- Test servo")
 
-    for position in range (1150, 8650, 50):
+    for position in range (1150, 8650, 50): # range(start, stop, step)
         servo_pwm.duty_u16(position)
         utime.sleep(0.02)
 
@@ -413,21 +435,28 @@ def cycle_servo():
     
     print("--- Servo test complete")
 
-def angle_servo(deg):
+def angle_servo(angle):
 
     # Set servo parameter values
-    max_deg = 180
-    min_deg = 0
-    max_duty = 8650
-    min_duty = 1150
+    max_degree = 180
+    min_degree = 0
+    # Pico PWM can be set between 0 and 65536 (16-bit logical level)
+    # The SG90 servo uses 1000 to 9000 for all the available angles
+    max_duty = 9000
+    min_duty = 1000
+    # But it does not go through the full 180 degrees
+    # experimented with max_duty = 8650 min_duty = 1150
+    
+    # Expanded calculation of duty cycle required for the angle specified in degrees
+    duty_range = max_duty - min_duty
+    deg_range = max_degree - min_degree
+    duty_per_deg = duty_range // deg_range
+    angle_duty = (duty_per_deg * angle) + min_duty
+       
+    print("Position ", angle, angle_duty)
 
-    # Calculate PWM Duty Cycle for deg
-    position = max(min(max_duty, (deg - min_deg) * (max_duty - min_duty) // (max_deg - min_deg) + min_duty), min_duty)
-   
-    print("Position ", position)
-
-    # Set the duty cycle of the PWM defined as pwm
-    servo_pwm.duty_u16(position)
+    # Set servo angle according the calculated duty cycle
+    servo_pwm.duty_u16(angle_duty)
 
     # Wait for servo to set
     utime.sleep(0.5)
@@ -436,55 +465,56 @@ def angle_servo(deg):
 #  Motor Control Functions
 # -------------------------
 
+# Drive states
+
 def stop():
     print("--- STOP ---")
-    
-    motor_1a.low()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.low()
+    right_reverse.low()
+    left_reverse.low()
+    left_forward.low()
+    right_forward.low()
 
 def forward():
-    #print(">>> Set FORWARD >>>")
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.high()
-    motor_2b.low()
-    #print ("--- FORWARD set")
-
+    print(">>> Set FORWARD >>>")
+    right_reverse.low()
+    left_reverse.low()
+    left_forward.high()
+    right_forward.high()
+    
 def reverse():
     print("<<< Set REVERSE <<<")
+    right_forward.low()
+    left_forward.low()
+    left_reverse.high()
+    right_reverse.high()
     
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.low()
-    motor_2b.high()
+# Turn states
 
 def turn_left():
-    # Static left turn - left motors forward & right motors reverse
+    # Static left pivot - left motors reverse & right motors forward
     print("<<< TURN LEFT ---")
-    
+    stop()
     set_speed('slow')
-        
-    motor_1a.low()
-    motor_1b.high()
-    motor_2a.low()
-    motor_2b.high()
+    right_reverse.low()
+    left_forward.low()
+    left_reverse.high()
+    right_forward.high()
 
 def turn_right():
     # Static right turn - left motors forward & right motors reverse
     print("--- TURN RIGHT >>>")
-    
+    stop()
     set_speed('slow')
+    right_forward.low()
+    left_reverse.low()
+    right_reverse.high()
+    left_forward.high()
     
-    motor_1a.high()
-    motor_1b.low()
-    motor_2a.high()
-    motor_2b.low()
-    
+# Speed Control
+
 def duty_cycle(level):
     # The motor operating voltage is 3-6 volts
-    # The max duty cycle is 65025, power is on 100% off the cycle, 6v. 
+    # The max duty cycle is 65025, power is on 100% of the cycle, 6v. 
     # A 50% duty cycle is 32513 rounded, power is on 50% of the time, 3v.
     levels = 10
     max_duty = 65025 # 1111111111111111 = 65535?
@@ -492,10 +522,9 @@ def duty_cycle(level):
     duty_range = max_duty - min_duty
     duty = int((level/levels) * duty_range) + min_duty
     return duty
-    
 
 def set_speed(speed):
-    # Forward drive speed settings are slow, medium, economy and fast
+    # Forward drive speed settings are slow, medium, economy and full
     
     duty = 0
             
@@ -512,132 +541,13 @@ def set_speed(speed):
         duty = duty_cycle(10)
         
     if duty > 0:
-        motor_1_pwm.duty_u16(duty)
-        motor_2_pwm.duty_u16(duty)
-       #print ("--- PWM duty set for required speed")
+        left_pwm.duty_u16(duty)
+        right_pwm.duty_u16(duty)
+       #print ("--- Motors PWM duty set")
         
     else:
         print ("*** ERROR - invalid speed ***")
         
-def fwd_left_curve(speed='medium', turn_rate='gentle'):
-    # A forward drive speed settings are slow, medium, economy and full
-    # Turn can be gentle or sharp
-    # Note that if speed is fast only gentle turns will be executed
-    
-    if speed == 'slow':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(1)
-            right_duty_cycle = duty_cycle(2)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(1)
-            right_duty_cycle = duty_cycle(3)
-        
-    elif speed == 'medium':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(4)
-            right_duty_cycle = duty_cycle(5)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(4)
-            right_duty_cycle = duty_cycle(6)
-            
-    elif speed == 'economy':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(7)
-            right_duty_cycle = duty_cycle(8)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(7)
-            right_duty_cycle = duty_cycle(9)
-            
-    elif speed == 'full':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(9)
-            right_duty_cycle = duty_cycle(10)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(9)
-            right_duty_cycle = duty_cycle(10)
-            
-            print("NOTE - only gentle turns at full speed")
-    
-    motor_1_pwm.duty_u16(left_duty_cycle)
-    motor_2_pwm.duty_u16(right_duty_cycle)
-    
-def fwd_right_curve(speed='medium', turn_rate='gentle'):
-    # A forward drive speed settings are slow, medium, economy and full
-    # Turn can be gentle or sharp
-    # Note that if speed is fast only gentle turns will be executed
-                                      
-    if speed == 'slow':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(1)
-            right_duty_cycle = duty_cycle(2)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(1)
-            right_duty_cycle = duty_cycle(3)
-        
-    elif speed == 'medium':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(4)
-            right_duty_cycle = duty_cycle(5)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(4)
-            right_duty_cycle = duty_cycle(6)
-            
-    elif speed == 'economy':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(7)
-            right_duty_cycle = duty_cycle(8)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(7)
-            right_duty_cycle = duty_cycle(9)
-            
-    elif speed == 'full':
-        
-        if turn_rate == 'gentle':
-            left_duty_cycle = duty_cycle(9)
-            right_duty_cycle = duty_cycle(10)
-            
-        elif turn_rate == 'sharp':
-            left_duty_cycle = duty_cycle(9)
-            right_duty_cycle = duty_cycle(10)
-            
-            print("NOTE - only gentle turns at full speed")
-   
-    motor_1_pwm.duty_u16(right_duty_cycle)
-    motor_2_pwm.duty_u16(left_duty_cycle)
-
-# def set_duty(motor, speed):
-#         
-#     duty = calc_duty(duty_level)
-# 
-#     if motor == 'left':
-#         motor_1_pwm.duty_u16(duty)
-# 
-#     elif motor == 'right':
-#         motor_2_pwm.duty_u16(duty)
-# 
-#     elif motor == 'both':
-#         motor_1_pwm.duty_u16(duty)
-#         motor_2_pwm.duty_u16(duty)
-# 
-#     else:
-#         stop()
-#         print("ERROR - Invalid motor selection, stop executed")
-#         nav_state = 'stop'
-
 # ===============
 #  Drive Control
 # ===============
@@ -956,7 +866,7 @@ def verify_heading(req_heading, distance_remaining, current_speed):
 
 def target_position(deviation_angle, detour_distance, target_distance, obstacle_side):
     
-    # a) Calculate target position (heading & distance) from current position.
+    # a) Calculate target position (heading & distance) from detour position.
     #    This will be the new dead reconning point.
     # b) If the detour is successfull in avoided the obstacle the NavBot will set
     #    target mode and drive to target as per the target data from this point.
@@ -964,26 +874,29 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
     #    from target heading will be calculated from this point.
     
     # For the detour angle and travel distance how far did the navbot deviate
-    # from the original target heading? This is side of the detour triangle that
-    # is opposite the detour angle. The triangle is formed by the dead reconning
-    # point distance to target, the detour angle, the detour travel distance and
-    # the distance of the detour position from the target. The oposite side will
-    # be the new distance to target.
-    # The law of cosines will be used to calculate this distance and the turn
-    # angle the NavBot must execute to point towards the target
+    # from the original target heading? This is the side opposite the detour angle 
+    # of the detour triangle. This triangle is formed by the dead reconning point's
+    # distance to target, the detour angle, the detour travel distance and the 
+    # distance of the detour position from the target. The oposite side will be
+    # the new distance to target. The law of cosines will be used to calculate this
+    # new distance and heading. The new heading will be used to calculate the turn
+    # angle the NavBot must execute to point towards the target.
     #
-    #                   new target
-    #                    distance
-    #   target position____________detour position
-    #                  \          /
-    #                   \        /
-    #    target distance \      / detour distance &
-    #  & target heading   \    /  detour heading
-    #                      \  /
-    #                       \/
-    #                detour point (Last dead reconning point)
-    #                this is also the detour deviation angle
-    
+    #                new target heading
+    #                    and distance
+    #  target position ________________ detour position
+    #                  \              /
+    #                   \            /
+    #                    \          /
+    #  Distance remaining \        /  detour heading
+    #  to target & heading \      /    & distance
+    #                       \    /
+    #                        \  /
+    #                         \/
+    #              detour point (Last dead reconning point)
+    #                  and the detour deviation angle
+    #
+        
     if deviation_angle > 180:
         # angle outside target triangle
         deviation_angle = 360 - deviation_angle
@@ -997,12 +910,12 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
     
     else:
         # target distance = distance to target from detour position
-        new_target_distance = math.sqrt(target_distance**2 + detour_distance**2 - 2 * target_distance * detour_distance * math.cos(deviation_angle)) 
+        new_target_distance = math.sqrt(target_distance**2 + detour_distance**2 - 2 * target_distance * detour_distance * math.cos(math.radians(deviation_angle))) 
     
     print(":--> Target distance: ", new_target_distance)
           
     # calc detour position angle
-    detour_position_angle = math.acos((new_target_distance**2 + detour_distance**2 - target_distance**2) / (2 * new_target_distance * detour_distance))
+    detour_position_angle = math.degrees(math.acos((new_target_distance**2 + detour_distance**2 - target_distance**2) / (2 * new_target_distance * detour_distance)))
     
     print(":--> Detour position angle: ", detour_position_angle)
     
@@ -1144,6 +1057,7 @@ def drive_leg(target):
             
             print( ":--> Target direction obstructed, detour required")
             
+            # Execute detour and return heading and distance to target once obstacle has been avoided.
             new_target = detour(heading, distance)
             
             heading = new_target['heading']
@@ -1209,6 +1123,14 @@ def main():
     # If "manual" then NavBot will wait for joystick input from the user. This input
     # could be either forward, turn left, turn right or reverse. NavBot will report
     # if it encounters obstacles.
+    
+    # New Plan:
+    # When Navbot starts it waits for connection from Command Module
+    # Once connected it waits for a drive plan
+    # After receiving the drive plan it waits for execute command
+    # When the execute command is received it will start executing the plan
+    # It will transmit execution data back to command module
+    
     
     print ('*** Main START ***')
     
