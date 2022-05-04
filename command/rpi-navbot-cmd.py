@@ -7,6 +7,7 @@
 # Developed by Johannes van Schalkwyk
 # All rights are reserved
 
+# Written in Python 3.9.2 for execution on Raspberry Pi running Raspberry OS 64-bit 
 # Uses:
 #      Bluez for Linux
 #      tkinter
@@ -14,8 +15,8 @@
 import bluetooth
 import tkinter as tk
 from tkinter import ttk
-from tkinter import messagebox
 import threading
+import json
 import time
 import sys
 
@@ -24,7 +25,7 @@ import sys
 # ===============================
 app_name = "NavBot Commander"
 window_width = 550
-window_height = 720
+window_height = 740
 selected = "none"
 primary_color = 'lightblue'
 secondary_color = 'white'
@@ -93,12 +94,16 @@ def update_data():
         
         
         # Pause for GUI to update and user to read data
-        sleep(1)
+        time.sleep(1)
 
 # ---------------------------------
 #  Create thread for updating data
 # ---------------------------------
 data_task = threading.Thread(target = update_data, daemon = True)
+
+# ===================
+#  Control Functions
+# ===================
 
 def connect_bot():
     global bot_sock
@@ -131,18 +136,22 @@ def send_stop(sock):
     # Emergency stop
     pass
 
+# ===================
+#  Manage route data
+# ===================
+
 def load_routes():
     
     global routes
     
-    # Load routes from file    
+    # Load routes from file
     
     try:
         with open('routes.data', 'r') as openfile:
             routes = json.load(openfile)
             
     except IOError:
-        print("Data not loaded")
+        print("File not found")
         
         routes = [
             {
@@ -168,9 +177,11 @@ def load_routes():
                 'legs' : [{'leg' : 1, 'head' : 350, 'dist' : 150}]
             }
         ]
+
+        print("Loaded dummy routes")
         
     else:
-        print("Routes data loaded")
+        print("Routes loaded")
         
     
     finally:
@@ -180,25 +191,6 @@ def load_routes():
 
     #return routes
           
-# Expected routes format:
-#     routes = {
-#         'route' = [
-#             {'num' : 1,
-#              'desc' : "Single leg",
-#              'legs' : [{'leg' : 1, 'head' : 10, 'dist' : 150}]
-#             },
-#             {'num' : 2,
-#              'desc' : "Multi Leg",
-#              'legs' : [{'leg' : 1, 'head' : 100, 'dist' : 150},
-#                       {'route' : 2, 'leg' : 2, 'head' : 190, 'dist' : 50}]
-#             },
-#             {'num' : 3, # the dog led ally test
-#              'desc' : "Obstacle Navigation Test",
-#              'legs' : [{'route' : 1, 'leg' : 1, 'head' : 350, 'dist' : 150}]
-#             }
-#         ],
-#     }
-
 def save_routes(routes):
     
     # ---------------------
@@ -206,23 +198,63 @@ def save_routes(routes):
     # ---------------------
     
     try:
-    
         with open('routes.data', 'w') as outfile:
             json.dump(routes, outfile)
         
-        save_status = 'ok'
+        result = 'ok'
             
     except IOError:
         print("Data not saved")
-        save_status = 'ERR'    
+        result = 'ERR'    
         
     else:
         print("Data saved")
     
     finally:
-        print(save_status)
+        print("Result")
     
-    return save_status
+    return result
+
+def add_route():
+    global routes
+    print("Add route clicked")
+    print(routes)
+
+    # Update routes list
+    route_num = (len(routes)) + 1
+    new_route = { 'num' : route_num, 'desc' : '<new route>'}
+    routes.append(new_route)
+
+    # Write routes list to file
+    save_routes(routes)
+
+    # Update routes display
+    redisplay_routes(route_num)
+    print(routes)
+    print(type(routes))
+    pass
+
+def add_leg():
+    print("Add leg clicked")
+    selected_route = route_tree.focus()
+    print(selected_route, type(selected_route))
+
+def update_route():
+    print("Update route clicked")
+    pass
+
+def update_leg():
+    print("Update leg clicked")
+    pass
+
+def delete_route():
+    print("Delete route clicked")
+    pass
+
+def delete_leg():
+    print("Delete leg clicked")
+    pass
+
 
 # ===================
 #  Create GUI Object
@@ -234,9 +266,10 @@ def save_routes(routes):
 
 def create_styles(win):
     
-    # Style configuration
+    # Add Style Object
     win.style = ttk.Style(win)
-    
+
+    # Style configuration
     win.style.configure('TLabel', font = ('Helvetica', 11))
     win.style.configure('Connect.TButton', font = ('Helvetica', 11), background = '#00ff00')
     win.style.configure('Heading.TLabel', font = ('Helvetica', 16))
@@ -315,86 +348,85 @@ def create_control_frame(container):
     
     return frame
 
-def create_progress_frame(container):
+def create_progress_frame(win):
     
     # Create frame object
-    frame = ttk.Frame(container)
-    
-    # Sub heading for progress display
-    #lbl_progress = ttk.Label(root, text = 'Route Progress:')
-    #lbl_progress.grid(column = 0, row = 2, columnspan = 2)
+    prog_frame = ttk.Frame(win)
     
     # Define grid columns
-    frame.columnconfigure(0, weight=2)
-    frame.columnconfigure(1, weight=2)
-    frame.columnconfigure(2, weight=2)
-    frame.columnconfigure(3, weight=1)
-    #frame.columnconfigure(4, weight=2)
-    #frame.columnconfigure(5, weight=1)
-    #frame.columnconfigure(6, weight=2)
-    #frame.columnconfigure(7, weight=1)
+    prog_frame.columnconfigure(0, weight=2)
+    prog_frame.columnconfigure(1, weight=2)
+    prog_frame.columnconfigure(2, weight=2)
+    prog_frame.columnconfigure(3, weight=1)
+    
+    # Abandoned this because disabled/readonly state does not display value
+    #entry_cleg = ttk.Entry(prog_frame, width = 3, foreground='red')
+    #entry_cleg.grid(column=0, row=1)
+    #entry_cleg.insert(0, '1')
     
     # Current leg data
-    lbl_cleg = ttk.Label(frame, text = 'Current Leg #')
-    lbl_cleg.grid(column = 0, row = 0, padx = 15, pady = 5)
+    curr_leg_head = ttk.Label(prog_frame, text = 'Current Leg #')
+    curr_leg_head.grid(column = 0, row = 0, padx = 15, pady = 5)
+    curr_leg_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[0])
+    curr_leg_val.grid(column = 0, row = 1)
     
-    lbl_cleg_data = ttk.Label(frame, textvariable = nav_data[0])
-    lbl_cleg_data.grid(column = 0, row = 1)
+    leg_heading_head = ttk.Label(prog_frame, text = 'Leg Heading')
+    leg_heading_head.grid(column = 1, row = 0, padx = 15, pady = 5)
+    leg_heading_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[1])
+    leg_heading_val.grid(column = 1, row = 1)
     
-    lbl_lhead = ttk.Label(frame, text = 'Leg Heading')
-    lbl_lhead.grid(column = 1, row = 0, padx = 15, pady = 5)
-    
-    lbl_lheadv = ttk.Label(frame, textvariable = nav_data[1])
-    lbl_lheadv.grid(column = 1, row = 1)
-    
-    lbl_ldist = ttk.Label(frame, text = 'Leg Distance')
-    lbl_ldist.grid(column = 2, row = 0, padx = 15, pady = 5)
-    
-    lbl_ldistv = ttk.Label(frame, textvariable = nav_data[2])
-    lbl_ldistv.grid(column = 2, row = 1)
+    leg_dist_head = ttk.Label(prog_frame, text = 'Leg Distance')
+    leg_dist_head.grid(column = 2, row = 0, padx = 15, pady = 5)
+    leg_dist_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[2])
+    leg_dist_val.grid(column = 2, row = 1)
     
     # Current status data
-    lbl_cstatus = ttk.Label(frame, text = 'Current Status')
-    lbl_cstatus.grid(column = 0, row = 10, padx = 15, pady = 5)
-    lbl_cstatusv = ttk.Label(frame, textvariable = nav_data[3])
-    lbl_cstatusv.grid(column = 0, row = 11)
-    lbl_cheading = ttk.Label(frame, text = 'Heading')
-    lbl_cheading.grid(column = 1, row = 10, padx = 15, pady = 5)
-    lbl_cheadingv = ttk.Label(frame, textvariable = nav_data[4])
-    lbl_cheadingv.grid(column = 1, row = 11)
-    lbl_cdistance = ttk.Label(frame, text = 'Travel Distance')
-    lbl_cdistance.grid(column = 2, row = 10, padx = 15, pady = 5)
-    lbl_cdistancev = ttk.Label(frame, textvariable = nav_data[5])
-    lbl_cdistancev.grid(column = 2, row = 11)
+    curr_stat_head = ttk.Label(prog_frame, text = 'Current Status')
+    curr_stat_head.grid(column = 0, row = 10, padx = 15, pady = 5)
+    curr_stat_val = ttk.Label(prog_frame, textvariable = nav_data[3])
+    curr_stat_val.grid(column = 0, row = 11)
+
+    heading_head = ttk.Label(prog_frame, text = 'Heading')
+    heading_head.grid(column = 1, row = 10, padx = 15, pady = 5)
+    heading_val = ttk.Label(prog_frame, textvariable = nav_data[4])
+    heading_val.grid(column = 1, row = 11)
+
+    trav_dist_head = ttk.Label(prog_frame, text = 'Travel Distance')
+    trav_dist_head.grid(column = 2, row = 10, padx = 15, pady = 5)
+    trav_dist_val = ttk.Label(prog_frame, textvariable = nav_data[5])
+    trav_dist_val.grid(column = 2, row = 11)
     
     # Sonic Distance
-    lbl_sdist = ttk.Label(frame, text = 'Sonic Distance')
-    lbl_sdist.grid(column = 3, row = 10, pady = 5)
-    lbl_sdistv = ttk.Label(frame, textvariable = nav_data[6])
-    lbl_sdistv.grid(column = 3, row = 11)
+    son_dist_head = ttk.Label(prog_frame, text = 'Sonic Distance')
+    son_dist_head.grid(column = 3, row = 10, pady = 5)
+    son_dist_val = ttk.Label(prog_frame, textvariable = nav_data[6])
+    son_dist_val.grid(column = 3, row = 11)
     
     # Counter data
-    lbl_count = ttk.Label(frame, text = 'Slot Counters:')
-    lbl_count.grid(column = 0, row = 20, pady = 5)
+    count_header = ttk.Label(prog_frame, text = 'Slot Counters:')
+    count_header.grid(column = 0, row = 20, pady = 5)
     
-    lbl_lf = ttk.Label(frame, text = 'Left Front')
-    lbl_lf.grid(column = 0, row = 30)
-    lbl_lfv = ttk.Label(frame, textvariable = nav_data[7])
-    lbl_lfv.grid(column = 0, row = 31)
-    lbl_rf = ttk.Label(frame, text = 'Right Front')
-    lbl_rf.grid(column = 1, row = 30)
-    lbl_rfv = ttk.Label(frame, textvariable = nav_data[8])
-    lbl_rfv.grid(column = 1, row = 31)
-    lbl_lr = ttk.Label(frame, text = 'Left Rear')
-    lbl_lr.grid(column = 2, row = 30)
-    lbl_lrv = ttk.Label(frame, textvariable = nav_data[9])
-    lbl_lrv.grid(column = 2, row = 31)
-    lbl_rr = ttk.Label(frame, text = 'Right Rear')
-    lbl_rr.grid(column = 3, row = 30)
-    lbl_rrv = ttk.Label(frame, textvariable = nav_data[10])
-    lbl_rrv.grid(column = 3, row = 31)
+    left_front_head = ttk.Label(prog_frame, text = 'Left Front')
+    left_front_head.grid(column = 0, row = 30)
+    left_front_val = ttk.Label(prog_frame, textvariable = nav_data[7])
+    left_front_val.grid(column = 0, row = 31)
+
+    right_front_head = ttk.Label(prog_frame, text = 'Right Front')
+    right_front_head.grid(column = 1, row = 30)
+    right_front_val = ttk.Label(prog_frame, textvariable = nav_data[8])
+    right_front_val.grid(column = 1, row = 31)
+
+    left_rear_head = ttk.Label(prog_frame, text = 'Left Rear')
+    left_rear_head.grid(column = 2, row = 30)
+    left_rear_val = ttk.Label(prog_frame, textvariable = nav_data[9])
+    left_rear_val.grid(column = 2, row = 31)
+
+    right_rear_head = ttk.Label(prog_frame, text = 'Right Rear')
+    right_rear_head.grid(column = 3, row = 30)
+    right_rear_val = ttk.Label(prog_frame, textvariable = nav_data[10])
+    right_rear_val.grid(column = 3, row = 31)
     
-    return frame
+    return prog_frame
     
 def create_routes_frame(container):
     
@@ -408,13 +440,15 @@ def create_routes_frame(container):
     # Create scrollbar
     route_scroll = ttk.Scrollbar(route_frame)
     route_scroll.pack(side = tk.RIGHT, fill=tk.Y)
-    
-    
+        
     # Create the treeview
     global route_tree
-    route_tree = ttk.Treeview(route_frame,
-                              yscrollcommand = route_scroll.set,
-                              selectmode = "extended")
+    route_tree = ttk.Treeview(
+        route_frame,
+        yscrollcommand = route_scroll.set,
+        selectmode = "extended"
+    )
+
     # Display
     route_tree.pack()
     
@@ -440,43 +474,77 @@ def create_routes_frame(container):
       
     return route_frame
 
-def create_route_entry_frame(container):
+def create_route_entry_frame(win):
     
     # ------------------------
     #  Create route entry box 
     # ------------------------
     
     global route_entry_frame
-    route_entry_frame = ttk.LabelFrame(container, text="Route Data")
-    #route_entry_frame.grid(row=6, column=0, padx=10)
-    #route_entry_frame.grid(padx=10)
+    route_entry_frame = ttk.LabelFrame(win, text="Route Maintenance")
     
+    # Define entry frame columns
     route_entry_frame.columnconfigure(0, weight=1)
     route_entry_frame.columnconfigure(1, weight=2)
-    
-    
+        
     route_num_label = ttk.Label(route_entry_frame, text="Route #")
     route_num_label.grid(row=0, column=0, padx=5, pady=5)
+    
     global route_num_entry
     route_num_entry = ttk.Entry(route_entry_frame, width = 4)
     route_num_entry.grid(row=1, column=0, padx=5, pady=5)
 
     route_name_label = ttk.Label(route_entry_frame, text="Route Name")
     route_name_label.grid(row=0, column=1, padx=5, pady=5)
+    
     global route_name_entry
     route_name_entry = ttk.Entry(route_entry_frame, width = 20)
     route_name_entry.grid(row=1, column=1, padx=5, pady=5)
+
+    # Create buttons sub-frame object
+    entry_buttons_frame = ttk.Frame(route_entry_frame )
+    entry_buttons_frame.grid(column=0, row=2, columnspan=2)
+
+    # Define buttons sub-frame columns
+    entry_buttons_frame.columnconfigure(0, weight=1)
+    entry_buttons_frame.columnconfigure(1, weight=1)
+    entry_buttons_frame.columnconfigure(2, weight=1)
+       
+    ttk.Button(
+        entry_buttons_frame,
+        width = 4,
+        text = 'Add',
+        #style = 'Connect.TButton',
+        command = add_route
+    ).grid(column = 0, row = 3)
+    
+    ttk.Button(
+        entry_buttons_frame,
+        width = 6,
+        text = 'Update',
+        command = update_route
+    ).grid(column = 1, row = 3)
+
+    ttk.Button(
+        entry_buttons_frame,
+        width = 6,
+        text = 'Delete',
+        command = delete_route
+    ).grid(column = 2, row = 3)
+       
+    for widget in entry_buttons_frame.winfo_children():
+        widget.grid(padx = 5, pady = 5) 
     
     return route_entry_frame
     
-def create_legs_frame(container):
+def create_legs_frame(win):
     
     # -------------------------------------------------
     #  Create a leg treeview with scrollbar in frame
     # -------------------------------------------------
     
     # Create frame
-    leg_frame = ttk.Frame(container)
+    leg_frame = ttk.Frame(win)
     
     # Create scrollbar
     leg_scroll = ttk.Scrollbar(leg_frame)
@@ -484,9 +552,12 @@ def create_legs_frame(container):
         
     # Create the treeview
     global leg_tree
-    leg_tree = ttk.Treeview(leg_frame,
-                              yscrollcommand = leg_scroll.set,
-                              selectmode = "extended")
+    leg_tree = ttk.Treeview(
+        leg_frame,
+        yscrollcommand = leg_scroll.set,
+        selectmode = "extended"
+    )
+
     # Display
     leg_tree.pack()
     
@@ -520,30 +591,68 @@ def create_leg_entry_frame(win):
     #  Create leg entry box 
     # ----------------------
     
-    leg_entry_frame = ttk.LabelFrame(win, text="Leg Data")
-        
+    leg_entry_frame = ttk.LabelFrame(win, text="Route Leg Maintenance")
+    
+    # Define entry frame columns
     leg_entry_frame.columnconfigure(0, weight=1)
     leg_entry_frame.columnconfigure(1, weight=2)
-    leg_entry_frame.columnconfigure(3, weight=2)
+    leg_entry_frame.columnconfigure(2, weight=2)
     
     leg_num_label = ttk.Label(leg_entry_frame, text="Leg #")
     leg_num_label.grid(row=0, column=0, padx=2, pady=5)
+    
     global leg_num_entry
     leg_num_entry = ttk.Entry(leg_entry_frame, width = 3)
     leg_num_entry.grid(row=1, column=0, padx=2, pady=5)
 
     leg_head_label = ttk.Label(leg_entry_frame, text="Heading (deg)")
     leg_head_label.grid(row=0, column=1, padx=2, pady=5)
+    
     global leg_head_entry
     leg_head_entry = ttk.Entry(leg_entry_frame, width = 10)
     leg_head_entry.grid(row=1, column=1, padx=2, pady=5)
     
     leg_dist_label = ttk.Label(leg_entry_frame, text="Distance (cm)")
     leg_dist_label.grid(row=0, column=2, padx=2, pady=5)
+    
     global leg_dist_entry
     leg_dist_entry = ttk.Entry(leg_entry_frame, width = 10)
     leg_dist_entry.grid(row=1, column=2, padx=2, pady=5)
+
+    # Create buttons sub-frame object
+    entry_buttons_frame = ttk.Frame(leg_entry_frame )
+    entry_buttons_frame.grid(column=0, row=2, columnspan=3)
+
+    # Define buttons sub-frame columns
+    entry_buttons_frame.columnconfigure(0, weight=1)
+    entry_buttons_frame.columnconfigure(1, weight=1)
+    entry_buttons_frame.columnconfigure(2, weight=1)
+       
+    ttk.Button(
+        entry_buttons_frame,
+        width = 4,
+        text = 'Add',
+        #style = 'Connect.TButton',
+        command = add_leg
+    ).grid(column = 0, row = 3)
     
+    ttk.Button(
+        entry_buttons_frame,
+        width = 6,
+        text = 'Update',
+        command = update_leg
+    ).grid(column = 1, row = 3)
+
+    ttk.Button(
+        entry_buttons_frame,
+        width = 6,
+        text = 'Delete',
+        command = delete_leg
+    ).grid(column = 2, row = 3)
+       
+    for widget in entry_buttons_frame.winfo_children():
+        widget.grid(padx = 5, pady = 5)
+
     return leg_entry_frame
 
 # -----------------------------
@@ -571,6 +680,7 @@ def display_routes():
                 ),
                 tags=('evenrow',)
             )
+
         else:
             route_tree.insert(
                 parent='',
@@ -584,7 +694,31 @@ def display_routes():
                 tags=('oddrow',))
 		
         route_count += 1
-        
+
+def redisplay_routes(new):
+
+    # Clear entry boxes
+    clear_route_entry()
+    clear_leg_entry()
+
+    # Clear the treeviews
+    route_tree.delete(*route_tree.get_children())
+    leg_tree.delete(*leg_tree.get_children())
+
+    # Display updated routes
+    display_routes()
+
+    # Remove current selection and focus
+    for item in route_tree.selection():
+        route_tree.selection_remove(item)
+
+    # Reset selection and focus to added route
+    route_tree.selection_set(str(new - 1))
+    route_tree.focus(str(new - 1))
+
+    # Display new route in entry box
+    fill_route_entry('e')
+
 def display_legs(selected_route):
        
     selected_route_legs = routes[selected_route]['legs']
@@ -609,6 +743,7 @@ def display_legs(selected_route):
                 ),
                 tags=('evenrow',)
             )
+
         else:
             leg_tree.insert(
                 parent='',
@@ -625,14 +760,15 @@ def display_legs(selected_route):
         leg_count += 1
 
 def display_route_legs(e):
-    print(e)
+    
     selected_route = int(route_tree.focus())
-    print(type(selected_route))
+    
     if selected_route == '':
         selected_route = 0
     
     # clear entry box
     clear_leg_entry()
+
     # Clear The Treeview Table
     leg_tree.delete(*leg_tree.get_children())
         
@@ -681,10 +817,16 @@ def fill_leg_entry(e):
 	leg_head_entry.insert(0, values[1])
 	leg_dist_entry.insert(0, values[2])
 
-# Clear entry boxes
+# Clear route entry boxes
+def clear_route_entry():
+	
+	leg_num_entry.delete(0, tk.END)
+	leg_head_entry.delete(0, tk.END)
+	leg_dist_entry.delete(0, tk.END)
+
+# Clear leg entry box
 def clear_leg_entry():
 	
-	# Clear leg entry box
 	leg_num_entry.delete(0, tk.END)
 	leg_head_entry.delete(0, tk.END)
 	leg_dist_entry.delete(0, tk.END)
@@ -702,6 +844,7 @@ def create_main_window():
     root = tk.Tk()
     root.title(app_name)
     #root.iconbitmap('temp.ico')
+
     # Set window position to the center of the screen
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
@@ -741,7 +884,10 @@ def create_main_window():
     lbl_header = ttk.Label(root, text = app_name, style = 'Heading.TLabel')
     lbl_header.grid(column = 0, row = 0, columnspan = 2, padx = 2, pady = 15)
     
-    # Create control buttons view
+    # ----------------------
+    #  Control Buttons View
+    # ----------------------
+
     control_frame = create_control_frame(root)
     control_frame.grid(column = 0, row = 1, columnspan = 2)
     
@@ -784,24 +930,30 @@ def create_main_window():
     #legs_entry_frame = create_leg_entry_frame(root, routes)
     legs_entry_frame = create_leg_entry_frame(root)
     legs_entry_frame.grid(column = 1, row = 6, pady = 5)
-        
-    # Display data
-#     display_routes(routes)
-#     display_legs(routes)
+    
+    # --------------
+    #  Display data
+    # --------------
+    
     display_routes()
     display_legs(0)
     
+    # ----------
+    #  Bindings
+    # ----------
+
     route_tree.bind("<ButtonRelease-1>", fill_route_entry)
     route_tree.bind("<ButtonRelease-1>", display_route_legs, add='+')
     leg_tree.bind("<ButtonRelease-1>", fill_leg_entry)
 
-    # Window display loop
+    # ----------------
+    #  Display Window
+    # ----------------
+
     root.mainloop()
+
     
 if __name__ == "__main__":
-    
-    # Read route data file from local drive
-    # Convert to dictionary data structure
     
     load_routes()
 #     if routes != []:
