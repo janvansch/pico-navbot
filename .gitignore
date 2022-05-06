@@ -20,3 +20,6 @@
 *.pyc
 *_xxx.*
 *x.py
+
+# data
+*.data

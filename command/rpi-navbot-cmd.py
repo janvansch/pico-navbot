@@ -15,6 +15,8 @@
 import bluetooth
 import tkinter as tk
 from tkinter import ttk
+from tkinter import font
+from tkinter import messagebox
 import threading
 import json
 import time
@@ -25,7 +27,7 @@ import sys
 # ===============================
 app_name = "NavBot Commander"
 window_width = 550
-window_height = 740
+window_height = 760
 selected = "none"
 primary_color = 'lightblue'
 secondary_color = 'white'
@@ -109,7 +111,7 @@ def connect_bot():
     global bot_sock
     bot_sock = bt_connect()
     
-def send_route(sock):
+def send_route():
     
     # Get data for selected route
     
@@ -117,7 +119,7 @@ def send_route(sock):
     # Send json data to NavBot via Bluetooth
     pass
 
-def send_start(sock):
+def send_start():
     
     # This function will:
     #  - First activate the data collection thread
@@ -131,20 +133,18 @@ def send_start(sock):
     
     pass
 
-def send_stop(sock):
+def send_stop():
     
     # Emergency stop
     pass
 
-# ===================
-#  Manage route data
-# ===================
+# ====================
+#  Routes load & save
+# ====================
 
 def load_routes():
     
     global routes
-    
-    # Load routes from file
     
     try:
         with open('routes.data', 'r') as openfile:
@@ -152,7 +152,10 @@ def load_routes():
             
     except IOError:
         print("File not found")
-        
+        messagebox.showerror("Error", "ERROR: Routes data file not found!")
+
+        # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+        # Temp for testing, to be removed
         routes = [
             {
                 'num' : 1,
@@ -177,25 +180,22 @@ def load_routes():
                 'legs' : [{'leg' : 1, 'head' : 350, 'dist' : 150}]
             }
         ]
+        # ++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
         print("Loaded dummy routes")
-        
+        messagebox.showinfo("INFO", "Loaded dummy data.")
+
     else:
         print("Routes loaded")
-        
-    
+
     finally:
         print(routes)
         print(type(routes))
-        print("End")
+        print("Routes Load End")
 
     #return routes
           
 def save_routes(routes):
-    
-    # ---------------------
-    #  Save routes to file
-    # ---------------------
     
     try:
         with open('routes.data', 'w') as outfile:
@@ -205,56 +205,165 @@ def save_routes(routes):
             
     except IOError:
         print("Data not saved")
-        result = 'ERR'    
+        result = 'ERR'
+        messagebox.showerror("ERROR", "Routes data NOT saved!")    
         
     else:
         print("Data saved")
-    
+
     finally:
-        print("Result")
+        print("Routes Save End")
     
     return result
 
-def add_route():
-    global routes
-    print("Add route clicked")
-    print(routes)
+# =========================
+#  Routes data maintenance
+# ========================= 
 
-    # Update routes list
-    route_num = (len(routes)) + 1
-    new_route = { 'num' : route_num, 'desc' : '<new route>'}
+# -----------------------------
+#  Route maintenance functions
+# ----------------------------- 
+
+def add_route():
+        
+    print("Add route clicked")
+
+    global routes
+    
+    # Add dummy route entry to routes list
+    new_route_num = (len(routes)) + 1
+    new_route = { 'num' : new_route_num, 'desc' : '<new route>', 'legs' : []}
     routes.append(new_route)
 
     # Write routes list to file
     save_routes(routes)
 
     # Update routes display
-    redisplay_routes(route_num)
+    redisplay_routes(new_route_num - 1) # list index starts from 0
+
     print(routes)
     print(type(routes))
-    pass
-
-def add_leg():
-    print("Add leg clicked")
-    selected_route = route_tree.focus()
-    print(selected_route, type(selected_route))
 
 def update_route():
-    print("Update route clicked")
-    pass
 
-def update_leg():
-    print("Update leg clicked")
-    pass
+    print("Update route clicked")
+
+    # Get index of selected route
+    route_idx = route_tree.focus()
+    
+    # Update route description
+    routes[int(route_idx)]['desc'] = route_name_entry.get()
+
+    # Write routes list to file
+    save_routes(routes)
+
+    # Update routes display
+    redisplay_routes(route_idx)
+
+    # Update legs display
+    display_route_legs('e')
 
 def delete_route():
+
     print("Delete route clicked")
-    pass
+
+    # Selected route
+    route_idx = route_tree.focus()
+    
+    # Pop route off routes list
+    routes.pop(int(route_idx))
+    
+    # Renumber routes
+    for item in range(0, len(routes)):
+       routes[item]['num'] = item + 1 # routes numberred from 1
+
+    # Write routes list to file
+    save_routes(routes)
+    
+    # Update routes display
+    redisplay_routes(0) # original selected route deleted
+
+    # Update legs display
+    display_legs(0) # original selected route deleted
+
+# ---------------------------------
+#  Route leg maintenance functions
+# --------------------------------- 
+
+def add_leg():
+
+    print("Add leg clicked")
+
+    # Selected route
+    route_num = route_tree.focus()
+    print("route: ", route_num, type(route_num))
+
+    # Append dummy leg legs list
+    if len(routes[int(route_num)]['legs']) > 0:
+        # Add to end of list
+        new_leg = { 'leg' : len(routes[int(route_num)]['legs']) + 1, 'head' : 0, 'dist' : 0}
+        routes[int(route_num)]['legs'].append(new_leg)
+    
+    else:
+        # Add first leg
+        new_leg = { 'leg' : 0, 'head' : 0, 'dist' : 0}
+        routes[int(route_num)]['legs'].append(new_leg)
+    
+    # Write routes list to file
+    save_routes(routes)
+
+    # Update legs display
+    display_route_legs('e')
+    
+def update_leg():
+
+    print("Update leg clicked")
+
+    # Leg and route reference
+    route_idx = route_tree.focus()
+    leg_idx = leg_tree.focus()
+    
+    #Check that a leg was selected
+    if leg_idx == '':
+        messagebox.showinfo("INFO", "Select a leg to update.")
+
+    else:
+        # Update route description
+        routes[int(route_idx)]['legs'][int(leg_idx)]['head'] = leg_head_entry.get()
+        routes[int(route_idx)]['legs'][int(leg_idx)]['dist'] = leg_dist_entry.get()
+
+        # Write routes list to file
+        save_routes(routes)
+
+        # Update legs display
+        display_route_legs('e')
 
 def delete_leg():
     print("Delete leg clicked")
-    pass
 
+    # Check that a leg was selected    
+    leg_idx_str = leg_tree.focus()
+    if leg_idx_str == '':
+        messagebox.showinfo("INFO", "Select a leg to delete.")
+
+    else:
+        # selected leg and route reference
+        route_idx = int(route_tree.focus())
+        leg_idx = int(leg_idx_str)
+
+        # Pop leg from legs list of the selected route
+        routes[route_idx]['legs'].pop(leg_idx)
+
+        # Renumber legs
+        legs_len = len(routes[route_idx]['legs'])
+        for item in range(0, legs_len):
+            routes[route_idx]['legs'][item]['leg'] = item + 1 # legs are numberred from 1
+
+        # Write routes list to file
+        save_routes(routes)
+        
+        # Update legs display
+        display_route_legs('e') # original selected route deleted
 
 # ===================
 #  Create GUI Object
@@ -265,27 +374,41 @@ def delete_leg():
 # -----------------------
 
 def create_styles(win):
-    
+
+    # Set default font
+    def_font_detail = font.nametofont("TkDefaultFont").actual()
+    print(def_font_detail)
+    default_font = def_font_detail['family']
+        
     # Add Style Object
     win.style = ttk.Style(win)
 
     # Style configuration
-    win.style.configure('TLabel', font = ('Helvetica', 11))
-    win.style.configure('Connect.TButton', font = ('Helvetica', 11), background = '#00ff00')
-    win.style.configure('Heading.TLabel', font = ('Helvetica', 16))
-    win.style.configure('SubHeading.TLabel', font = ('Helvetica', 14), justify = 'left')
+    win.style.configure('TLabel', font = (default_font, 10))
+    win.style.configure('TEntry', font = (default_font, 10, 'bold'), foreground = '#0000ff')
+    win.style.configure('TButton', font = (default_font, 10))
+
+    # Styles forControl buttons
+    win.style.configure('Connect.TButton', font = (default_font, 9, 'bold'), foreground = '#bbbbff', background = '#4444ff')
+    win.style.configure('SendRoute.TButton', font = (default_font, 9, 'bold'), foreground = '#4444ff', background = '#55ffff')
+    win.style.configure('Start.TButton', font = (default_font, 9, 'bold'), foreground = '#bb3333', background = '#55ff55')
+    win.style.configure('Stop.TButton', font = (default_font, 9, 'bold'), foreground = '#ffbb00', background = '#aa2222')
+
+    win.style.configure('Heading.TLabel', font = (default_font, 16))
+    win.style.configure('SubHeading.TLabel', font = (default_font, 14), justify = 'left')
     
     # Configure the Treeview Colors
-    win.style.configure("Treeview",
-        background="#D3D3D3",
-        foreground="black",
-        rowheight=25,
-        fieldbackground="#D3D3D3"
+    win.style.configure(
+        'Treeview',
+        background = '#D3D3D3',
+        foreground = 'black',
+        rowheight = 25,
+        fieldbackground = '#D3D3D3'
     )
     
     # Change selected row color #347083
     win.style.map('Treeview',
-        background=[('selected', '#347083')]
+        background = [('selected', '#347083')]
     )
     
 def create_data_vars(win):
@@ -319,10 +442,10 @@ def create_data_vars(win):
         rr_count
     ]
     
-def create_control_frame(container):
+def create_control_frame(win):
     
     # Create frame object
-    frame = ttk.Frame(container)
+    frame = ttk.Frame(win)
     
     # Define grid columns
     frame.columnconfigure(0, weight=3)
@@ -338,13 +461,31 @@ def create_control_frame(container):
         command = bt_connect
     ).grid(column = 0, row = 0)
     
-    ttk.Button(frame, text = 'Send Route').grid(column = 1, row = 0)
+    ttk.Button(
+        frame, 
+        text = 'Send Route',
+        style = 'SendRoute.TButton',
+        command = send_route()
+        ).grid(column = 1, row = 0)
+        
     #ttk.Button(frame, text = ' ').grid(column = 2, row = 0)
-    ttk.Button(frame, text = 'Start').grid(column = 3, row = 0)
-    ttk.Button(frame, text = 'Stop').grid(column = 4, row = 0)
+
+    ttk.Button(
+        frame, 
+        text = 'Start',
+        style = 'Start.TButton',
+        command = send_start()
+        ).grid(column = 3, row = 0)
+    
+    ttk.Button(
+        frame, 
+        text = 'Stop',
+        style = 'Stop.TButton',
+        command = send_stop()
+        ).grid(column = 4, row = 0)
     
     for widget in frame.winfo_children():
-        widget.grid(padx = 2, pady = 5)
+        widget.grid(padx = 5, pady = 5)
     
     return frame
 
@@ -491,7 +632,7 @@ def create_route_entry_frame(win):
     route_num_label.grid(row=0, column=0, padx=5, pady=5)
     
     global route_num_entry
-    route_num_entry = ttk.Entry(route_entry_frame, width = 4)
+    route_num_entry = ttk.Entry(route_entry_frame, width = 4, state = "readonly")
     route_num_entry.grid(row=1, column=0, padx=5, pady=5)
 
     route_name_label = ttk.Label(route_entry_frame, text="Route Name")
@@ -602,21 +743,21 @@ def create_leg_entry_frame(win):
     leg_num_label.grid(row=0, column=0, padx=2, pady=5)
     
     global leg_num_entry
-    leg_num_entry = ttk.Entry(leg_entry_frame, width = 3)
+    leg_num_entry = ttk.Entry(leg_entry_frame, width = 3, state = "readonly")
     leg_num_entry.grid(row=1, column=0, padx=2, pady=5)
 
     leg_head_label = ttk.Label(leg_entry_frame, text="Heading (deg)")
     leg_head_label.grid(row=0, column=1, padx=2, pady=5)
     
     global leg_head_entry
-    leg_head_entry = ttk.Entry(leg_entry_frame, width = 10)
+    leg_head_entry = ttk.Entry(leg_entry_frame, width = 8)
     leg_head_entry.grid(row=1, column=1, padx=2, pady=5)
     
     leg_dist_label = ttk.Label(leg_entry_frame, text="Distance (cm)")
     leg_dist_label.grid(row=0, column=2, padx=2, pady=5)
     
     global leg_dist_entry
-    leg_dist_entry = ttk.Entry(leg_entry_frame, width = 10)
+    leg_dist_entry = ttk.Entry(leg_entry_frame, width = 8)
     leg_dist_entry.grid(row=1, column=2, padx=2, pady=5)
 
     # Create buttons sub-frame object
@@ -695,7 +836,7 @@ def display_routes():
 		
         route_count += 1
 
-def redisplay_routes(new):
+def redisplay_routes(route_idx):
 
     # Clear entry boxes
     clear_route_entry()
@@ -712,16 +853,16 @@ def redisplay_routes(new):
     for item in route_tree.selection():
         route_tree.selection_remove(item)
 
-    # Reset selection and focus to added route
-    route_tree.selection_set(str(new - 1))
-    route_tree.focus(str(new - 1))
+    # Set selection and focus to added route
+    route_tree.selection_set(route_idx)
+    route_tree.focus(route_idx)
 
     # Display new route in entry box
     fill_route_entry('e')
 
-def display_legs(selected_route):
-       
-    selected_route_legs = routes[selected_route]['legs']
+def display_legs(route_idx):
+
+    selected_route_legs = routes[route_idx]['legs']
     
     print(selected_route_legs)
         
@@ -769,7 +910,7 @@ def display_route_legs(e):
     # clear entry box
     clear_leg_entry()
 
-    # Clear The Treeview Table
+    # Clear leg treeview table
     leg_tree.delete(*leg_tree.get_children())
         
     # Display legs of selected route
@@ -934,8 +1075,21 @@ def create_main_window():
     # --------------
     #  Display data
     # --------------
-    
+
+    # load routes data from file
+    load_routes()
+
+    # Display routes loaded
     display_routes()
+
+    # Select first route, index = 0
+    route_tree.selection_set(0)
+    route_tree.focus(0)
+
+    # Fill route entry box
+    fill_route_entry('e')
+
+    # Display legs of first route
     display_legs(0)
     
     # ----------
@@ -955,7 +1109,7 @@ def create_main_window():
     
 if __name__ == "__main__":
     
-    load_routes()
+    #load_routes()
 #     if routes != []:
 #         # Start GUI display
 #         create_main_window()

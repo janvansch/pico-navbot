@@ -10,9 +10,34 @@
 #              'legs' : [{'leg' : 1, 'head' : 100, 'dist' : 150},
 #                       {'route' : 2, 'leg' : 2, 'head' : 190, 'dist' : 50}]
 #             },
-#             {'num' : 3, # the dog led ally test
+#             {'num' : 3,
 #              'desc' : "Obstacle Navigation Test",
 #              'legs' : [{'route' : 1, 'leg' : 1, 'head' : 350, 'dist' : 150}]
 #             }
 #         ],
 #     }
+
+routes = [
+            {
+                'num' : 1,
+                'desc' : "Single leg",
+                'legs' : [{'leg' : 1, 'head' : 10, 'dist' : 150}]
+            },
+            {
+                'num' : 2,
+                'desc' : "Multi Leg",
+                'legs' : [
+                    {
+                        'leg' : 1, 'head' : 100, 'dist' : 150
+                    },
+                    {
+                        'leg' : 2, 'head' : 190, 'dist' : 50
+                    }
+                ]
+            },
+            {
+                'num' : 3,
+                'desc' : "Obstacle Navigation Test",
+                'legs' : [{'leg' : 1, 'head' : 350, 'dist' : 150}]
+            }
+        ]
