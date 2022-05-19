@@ -12,6 +12,7 @@
 #      Bluez for Linux
 #      tkinter
 
+from types import BuiltinFunctionType
 import bluetooth
 import tkinter as tk
 from tkinter import ttk
@@ -20,19 +21,20 @@ from tkinter import messagebox
 import threading
 import json
 import time
-import sys
+#import sys
 
 # ===============================
 #  Define & set golbal variables
 # ===============================
 app_name = "NavBot Commander"
 window_width = 550
-window_height = 760
+window_height = 770
 selected = "none"
 primary_color = 'lightblue'
 secondary_color = 'white'
 highlight_color = '#347083'
 routes = []
+route_sent = ''
 
 # When a window is resizable, you can specify the minimum and maximum sizes
 # min_width = 465
@@ -43,8 +45,77 @@ routes = []
 # window transparency, from 0.0 (fully transparent) to 1.0 (fully opaque):
 transparency = 1
 
-def log(event):
-    print(event)
+# ===================================================================
+#  Setup thread to read and process the progress data sent by NavBot
+# ===================================================================
+
+# Thread code - must be before the thread setup definition
+def update_data():
+
+    # Calculate click distance in cm
+    wheel_diameter = 65
+    wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
+
+    print(">>> THREAD: Wheel circumference: ", wheel_circumference)
+    
+    # Encoder slots
+    slots = 20
+    distance_per_click = wheel_circumference / (slots)
+
+    print(">>> THREAD: Distance per click: ", distance_per_click)
+        
+    # Continiously read NavBot data over connection
+    while True:
+        bt_data = sock.recv(1024)
+
+        print(">>> THREAD: Data received: ", bt_data)
+
+        if bt_data != '':
+
+            bot_data = json.loads(bt_data)
+            print(">>> THREAD: received from NavBot", bot_data)
+
+            # Calculate travel distance
+            avg_distance = (
+                    bot_data['lf_c'] +
+                    bot_data['rf_c'] +
+                    bot_data['lr_c'] +
+                    bot_data['rr_c']) / 4
+
+            travel_dist = int(avg_distance * distance_per_click) / 10
+
+            # Get current leg detail
+            leg_idx = bot_data['leg_n'] - 1
+            curr_leg = routes[int(route_sent)]['legs'][leg_idx]
+
+            # Update GUI with progress data received
+            nav_data[0].set(curr_leg['leg'])
+            nav_data[1].set(curr_leg['head'])
+            nav_data[2].set(curr_leg['dist'])
+            nav_data[3].set(bot_data['state'])
+            nav_data[4].set(bot_data['t_head'])
+            nav_data[5].set(travel_dist)
+            nav_data[6].set(bot_data['s_dist'])
+            nav_data[7].set(bot_data['lf_c'])
+            nav_data[8].set(bot_data['rf_c'])
+            nav_data[9].set(bot_data['lr_c'])
+            nav_data[10].set(bot_data['rr_c'])
+            
+            
+            # Pause for GUI to update and user to read data
+            time.sleep(1)
+        else:
+            print(">>> THREAD: No progress data")
+            time.sleep(1)
+
+# --------------------
+#  Define thread task
+# --------------------
+data_task = threading.Thread(target = update_data, daemon = True)
+print("=== Thread defined ===")
+
+# def log(event):
+#     print(event)
 
 # ============================
 #  Bluetooth connection setup
@@ -52,91 +123,192 @@ def log(event):
 
 def bt_connect():
     #
-    # Connect to NavBot Bluetooth interface 
+    # Connect to NavBot via Bluetooth 
     #
-    bd_addr = "00:20:10:08:63:A3" # used rpi-findmyphone.py to get address
-    port = 1
-    sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
-    sock.connect((bd_addr, port))
-    return sock
 
-def read_nav_data(sock):
+    global result, sock
+
+    try:
+        # used rpi-findmyphone.py to get address
+        #bd_addr = "00:20:10:08:63:A3" # HC-05
+        bd_addr = "00:20:10:08:B0:1B" # HC-06
+        port = 1
+        sock = bluetooth.BluetoothSocket(bluetooth.RFCOMM)
+        sock.connect((bd_addr, port))
+        
+        result = 'Connected'
+            
+    except IOError:
+        print("Could not connect")
+        result = 'ERROR'
+        messagebox.showerror("ERROR", "Could not connect to NavBot!")    
+        
+    else:
+        print("Connected to NavBot: ", bd_addr)
+
+    finally:
+        print("Update display")
+        # Update display with result
+        connect_state.set(result)
+        # Send connected command
+        msg_body = json.dumps({'type' : 'CON','data' : []})
+        #bot_sock.send(msg_body + "\r\n")
+        print("JSON Message: ", msg_body)
+        sock.send(msg_body)
+    
+    
+
+# -----------------------------
+#  Read & update progress data
+# -----------------------------
+
+def read_nav_data():
     #
     # Retrieve data from NavBot
     #
     bt_data = sock.recv(1024)
     nav_data = json.loads(bt_data)
+    
     return nav_data
 
-def update_data():
-    #
-    # This runs as a thread
-    #
-    
-    # Connect Bluetooth
-    sock = bt_connect()
-    
-    # Continiously read NavBot data over connection
-    while True:
-        bot_data = read_nav_data(sock)
-        print(nav_data)
-        
-        # Update GUI with data received
-        nav_data[0].set(bot_data['leg_num'])
-        nav_data[1].set(bot_data['leg_heading'])
-        nav_data[2].set(bot_data['leg_distance'])
-        nav_data[3].set(bot_data['nav_status'])
-        nav_data[4].set(bot_data['travel_head'])
-        nav_data[5].set(bot_data['travel_dist'])
-        nav_data[6].set(bot_data['sonic_dist'])
-        nav_data[7].set(bot_data['lf_count'])
-        nav_data[8].set(bot_data['rf_count'])
-        nav_data[9].set(bot_data['lr_count'])
-        nav_data[10].set(bot_data['rr_count'])
-        
-        
-        # Pause for GUI to update and user to read data
-        time.sleep(1)
-
-# ---------------------------------
-#  Create thread for updating data
-# ---------------------------------
-data_task = threading.Thread(target = update_data, daemon = True)
 
 # ===================
 #  Control Functions
 # ===================
 
 def connect_bot():
+
+    # Initialise Bluetooth connection
     global bot_sock
     bot_sock = bt_connect()
+    print("Sock: ", bot_sock)
+
+def send_route_selected(pop_win, listbox):
+
+    # Get selected route
+    select_desc = listbox.get(listbox.curselection())
+    select_idx = listbox.curselection()
+    route_idx = ''
     
-def send_route():
+    for i in listbox.curselection():
+        print("index: ", i, type(i))
+        if i != '':
+            route_idx = i
     
-    # Get data for selected route
+    print("Selected option dec: ", select_desc, "Type: ", type(select_desc))
+    print("Selected option idx: ", select_idx, "Type: ", type(select_idx))
+    print("Route index: ", route_idx, "Type: ", type(route_idx))
+
+    # Close route selection popup
+    pop_win.destroy()
+
+    # Get legs of selected route
+    msg_body = json.dumps({
+        'type' : 'NAV',
+        'data' : routes[int(route_idx)]['legs']
+    })
     
-    # Convert to dictionary
+    print("Route data message: ", msg_body, type(msg_body))
+        
     # Send json data to NavBot via Bluetooth
-    pass
+    sock.send(msg_body)
+
+    # Update display with route description
+    send_state.set('Route: ' + str(route_idx + 1) )
+    
+    # Need to remember this for when receiving 
+    # progress data from NavBot Control
+    global route_sent
+    route_sent = route_idx
+
+def enable_button(e):
+    ok['state'] = tk.NORMAL
+
+def select_route(win):
+
+    # create popup window window
+    pop = tk.Toplevel(win)
+    #top.geometry("300x150") # width x cheight
+    pop.resizable(False, False)
+    pop.title("Select Route")
+        
+    pop.columnconfigure(0, weight=1)
+    pop.rowconfigure(0,weight=1)
+
+    pop.wm_transient(win)
+
+    list_label = ttk.Label(pop, text = 'Select a route and click continue: ')
+    list_label.pack(padx=15, pady=15)
+
+    list_values = [] # a list
+    for route in routes:
+        list_values.append(route['desc'])
+
+    list_var = tk.StringVar(value = list_values)
+
+    # Create scrollbar
+    top_scroll = ttk.Scrollbar(pop)
+    top_scroll.pack(side = tk.RIGHT, fill = tk.Y)
+
+    #global listbox
+    listbox = tk.Listbox(
+        pop,
+        listvariable = list_var,
+        height = len(list_values) + 1,
+        yscrollcommand = top_scroll.set,
+        selectmode = 'browse'
+    )
+    listbox.pack()
+    
+    # Configure the scrollbar
+    top_scroll.config(command = listbox.yview)
+
+    global ok
+    ok = ttk.Button(
+        pop, 
+        text = 'Continue',
+        style = 'SendRoute.TButton',
+        state = tk.DISABLED,
+        command = lambda: send_route_selected(pop, listbox)
+    )
+    ok.pack(padx=5, pady=15)
+
+    listbox.bind('<<ListboxSelect>>', enable_button)
 
 def send_start():
     
     # This function will:
     #  - First activate the data collection thread
     #  - Then send the instruction to the NavBot to start the drive.
-    # Navbot will only execute if a route was loaded.
-    
+        
     # Activate data collection thread
-    #data_task.start()
+    data_task.start()
+    print("=== Thread process started ===")
     
     # Send drive route command
+    msg_body = json.dumps({'type' : 'GO','data' : []})
+
+    print("Go message: ", msg_body, type(msg_body))
     
-    pass
+    # Send json data to NavBot via Bluetooth
+    sock.send(msg_body)
 
 def send_stop():
-    
+
     # Emergency stop
-    pass
+
+    # Not implemented!
+    # Currently MicroPython does not provide for
+    # UART IRQ. Have to find a workaround.
+
+    messagebox.showinfo("INFO", "Currently not available.")
+    
+    # msg_body = json.dumps({'type' : 'STOP','data' : []})
+    # print("Go message: ", msg_body, type(msg_body))
+    
+    # # Send json data to NavBot via Bluetooth
+    # sock.send(msg_body)
+
 
 # ====================
 #  Routes load & save
@@ -216,13 +388,14 @@ def save_routes(routes):
     
     return result
 
-# =========================
-#  Routes data maintenance
-# ========================= 
 
-# -----------------------------
-#  Route maintenance functions
-# ----------------------------- 
+# ===============================
+#  Routes list Maintenance
+# =============================== 
+
+# -------------
+#  Add a Route 
+# ------------- 
 
 def add_route():
         
@@ -244,6 +417,10 @@ def add_route():
     print(routes)
     print(type(routes))
 
+# ----------------
+#  Update a Route 
+# ---------------- 
+
 def update_route():
 
     print("Update route clicked")
@@ -262,6 +439,10 @@ def update_route():
 
     # Update legs display
     display_route_legs('e')
+
+# ----------------
+#  Delete s Route 
+# ---------------- 
 
 def delete_route():
 
@@ -286,34 +467,43 @@ def delete_route():
     # Update legs display
     display_legs(0) # original selected route deleted
 
-# ---------------------------------
-#  Route leg maintenance functions
-# --------------------------------- 
+
+# ===============================
+#  Routes legs Maintenance
+# =============================== 
+
+# -----------
+#  Add a Leg 
+# ----------- 
 
 def add_leg():
 
     print("Add leg clicked")
 
     # Selected route
-    route_num = route_tree.focus()
-    print("route: ", route_num, type(route_num))
+    route_idx = route_tree.focus()
+    print("route: ", route_idx, type(route_idx))
 
     # Append dummy leg legs list
-    if len(routes[int(route_num)]['legs']) > 0:
+    if len(routes[int(route_idx)]['legs']) > 0:
         # Add to end of list
-        new_leg = { 'leg' : len(routes[int(route_num)]['legs']) + 1, 'head' : 0, 'dist' : 0}
-        routes[int(route_num)]['legs'].append(new_leg)
+        new_leg = { 'leg' : len(routes[int(route_idx)]['legs']) + 1, 'head' : 0, 'dist' : 0}
+        routes[int(route_idx)]['legs'].append(new_leg)
     
     else:
         # Add first leg
         new_leg = { 'leg' : 0, 'head' : 0, 'dist' : 0}
-        routes[int(route_num)]['legs'].append(new_leg)
+        routes[int(route_idx)]['legs'].append(new_leg)
     
     # Write routes list to file
     save_routes(routes)
 
     # Update legs display
     display_route_legs('e')
+
+# --------------
+#  Update a Leg 
+# -------------- 
     
 def update_leg():
 
@@ -337,6 +527,10 @@ def update_leg():
 
         # Update legs display
         display_route_legs('e')
+
+# --------------
+#  Delete a Leg 
+# -------------- 
 
 def delete_leg():
     print("Delete leg clicked")
@@ -365,13 +559,10 @@ def delete_leg():
         # Update legs display
         display_route_legs('e') # original selected route deleted
 
-# ===================
-#  Create GUI Object
-# ===================
 
-# -----------------------
+# =======================
 #  Create GUI Components
-# -----------------------
+# =======================
 
 def create_styles(win):
 
@@ -415,6 +606,7 @@ def create_data_vars(win):
     
     # GUI data variables
     
+    # For progress view
     curr_leg_num = tk.IntVar(win, value = 99)
     curr_leg_heading = tk.IntVar(win, value = 360)
     curr_leg_distance = tk.IntVar(win, value = 999)
@@ -441,53 +633,67 @@ def create_data_vars(win):
         lr_count,
         rr_count
     ]
+
+    # For contol view
+    global connect_state
+    connect_state = tk.StringVar(win, 'Not connected')
+    global send_state
+    send_state = tk.StringVar(win, 'none')
     
 def create_control_frame(win):
     
     # Create frame object
-    frame = ttk.Frame(win)
+    ctrl_frame = ttk.Frame(win)
     
     # Define grid columns
-    frame.columnconfigure(0, weight=3)
-    frame.columnconfigure(1, weight=2)
-    frame.columnconfigure(2, weight=0)
-    frame.columnconfigure(3, weight=1)
-    frame.columnconfigure(4, weight=1)
+    ctrl_frame.columnconfigure(0, weight=3)
+    ctrl_frame.columnconfigure(1, weight=2)
+    ctrl_frame.columnconfigure(2, weight=0)
+    ctrl_frame.columnconfigure(3, weight=1)
+    ctrl_frame.columnconfigure(4, weight=1)
     
     ttk.Button(
-        frame,
+        ctrl_frame,
         text = 'Connect NavBot',
         style = 'Connect.TButton',
         command = bt_connect
     ).grid(column = 0, row = 0)
     
     ttk.Button(
-        frame, 
+        ctrl_frame, 
         text = 'Send Route',
         style = 'SendRoute.TButton',
-        command = send_route()
+        command = lambda: select_route(ctrl_frame)
         ).grid(column = 1, row = 0)
         
     #ttk.Button(frame, text = ' ').grid(column = 2, row = 0)
 
     ttk.Button(
-        frame, 
+        ctrl_frame, 
         text = 'Start',
         style = 'Start.TButton',
-        command = send_start()
+        command = send_start
         ).grid(column = 3, row = 0)
     
     ttk.Button(
-        frame, 
+        ctrl_frame, 
         text = 'Stop',
         style = 'Stop.TButton',
-        command = send_stop()
+        command = send_stop
         ).grid(column = 4, row = 0)
     
-    for widget in frame.winfo_children():
+    for widget in ctrl_frame.winfo_children():
         widget.grid(padx = 5, pady = 5)
     
-    return frame
+    global connect_state
+    lbl_connect_state = ttk.Label(ctrl_frame, foreground = '#0099ff', textvariable = connect_state)
+    lbl_connect_state.grid(column = 0, row = 1)
+    
+    global send_state
+    lbl_send_state = ttk.Label(ctrl_frame, foreground = '#0099ff', textvariable = send_state)
+    lbl_send_state.grid(column = 1, row = 1)
+    
+    return ctrl_frame
 
 def create_progress_frame(win):
     
@@ -499,6 +705,9 @@ def create_progress_frame(win):
     prog_frame.columnconfigure(1, weight=2)
     prog_frame.columnconfigure(2, weight=2)
     prog_frame.columnconfigure(3, weight=1)
+
+    # Text variable foreground
+    fg = '#0000ff'
     
     # Abandoned this because disabled/readonly state does not display value
     #entry_cleg = ttk.Entry(prog_frame, width = 3, foreground='red')
@@ -508,39 +717,39 @@ def create_progress_frame(win):
     # Current leg data
     curr_leg_head = ttk.Label(prog_frame, text = 'Current Leg #')
     curr_leg_head.grid(column = 0, row = 0, padx = 15, pady = 5)
-    curr_leg_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[0])
+    curr_leg_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[0])
     curr_leg_val.grid(column = 0, row = 1)
     
     leg_heading_head = ttk.Label(prog_frame, text = 'Leg Heading')
     leg_heading_head.grid(column = 1, row = 0, padx = 15, pady = 5)
-    leg_heading_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[1])
+    leg_heading_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[1])
     leg_heading_val.grid(column = 1, row = 1)
     
     leg_dist_head = ttk.Label(prog_frame, text = 'Leg Distance')
     leg_dist_head.grid(column = 2, row = 0, padx = 15, pady = 5)
-    leg_dist_val = ttk.Label(prog_frame, foreground='red', textvariable = nav_data[2])
+    leg_dist_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[2])
     leg_dist_val.grid(column = 2, row = 1)
     
     # Current status data
     curr_stat_head = ttk.Label(prog_frame, text = 'Current Status')
     curr_stat_head.grid(column = 0, row = 10, padx = 15, pady = 5)
-    curr_stat_val = ttk.Label(prog_frame, textvariable = nav_data[3])
+    curr_stat_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[3])
     curr_stat_val.grid(column = 0, row = 11)
 
     heading_head = ttk.Label(prog_frame, text = 'Heading')
     heading_head.grid(column = 1, row = 10, padx = 15, pady = 5)
-    heading_val = ttk.Label(prog_frame, textvariable = nav_data[4])
+    heading_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[4])
     heading_val.grid(column = 1, row = 11)
 
     trav_dist_head = ttk.Label(prog_frame, text = 'Travel Distance')
     trav_dist_head.grid(column = 2, row = 10, padx = 15, pady = 5)
-    trav_dist_val = ttk.Label(prog_frame, textvariable = nav_data[5])
+    trav_dist_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[5])
     trav_dist_val.grid(column = 2, row = 11)
     
     # Sonic Distance
     son_dist_head = ttk.Label(prog_frame, text = 'Sonic Distance')
     son_dist_head.grid(column = 3, row = 10, pady = 5)
-    son_dist_val = ttk.Label(prog_frame, textvariable = nav_data[6])
+    son_dist_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[6])
     son_dist_val.grid(column = 3, row = 11)
     
     # Counter data
@@ -549,22 +758,22 @@ def create_progress_frame(win):
     
     left_front_head = ttk.Label(prog_frame, text = 'Left Front')
     left_front_head.grid(column = 0, row = 30)
-    left_front_val = ttk.Label(prog_frame, textvariable = nav_data[7])
+    left_front_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[7])
     left_front_val.grid(column = 0, row = 31)
 
     right_front_head = ttk.Label(prog_frame, text = 'Right Front')
     right_front_head.grid(column = 1, row = 30)
-    right_front_val = ttk.Label(prog_frame, textvariable = nav_data[8])
+    right_front_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[8])
     right_front_val.grid(column = 1, row = 31)
 
     left_rear_head = ttk.Label(prog_frame, text = 'Left Rear')
     left_rear_head.grid(column = 2, row = 30)
-    left_rear_val = ttk.Label(prog_frame, textvariable = nav_data[9])
+    left_rear_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[9])
     left_rear_val.grid(column = 2, row = 31)
 
     right_rear_head = ttk.Label(prog_frame, text = 'Right Rear')
     right_rear_head.grid(column = 3, row = 30)
-    right_rear_val = ttk.Label(prog_frame, textvariable = nav_data[10])
+    right_rear_val = ttk.Label(prog_frame, foreground = fg, textvariable = nav_data[10])
     right_rear_val.grid(column = 3, row = 31)
     
     return prog_frame
@@ -796,9 +1005,9 @@ def create_leg_entry_frame(win):
 
     return leg_entry_frame
 
-# -----------------------------
-#  GUI Data Display Management
-# -----------------------------
+# ------------------
+#  GUI Data Display 
+# ------------------
 
 def display_routes():
     
@@ -972,9 +1181,9 @@ def clear_leg_entry():
 	leg_head_entry.delete(0, tk.END)
 	leg_dist_entry.delete(0, tk.END)
 	
-# --------------------
-#  Create Main Window
-# --------------------
+# ------------------------
+#  Main Window Definition
+# ------------------------
 
 def create_main_window():
     
@@ -1023,7 +1232,7 @@ def create_main_window():
     
     # Main header
     lbl_header = ttk.Label(root, text = app_name, style = 'Heading.TLabel')
-    lbl_header.grid(column = 0, row = 0, columnspan = 2, padx = 2, pady = 15)
+    lbl_header.grid(column = 0, row = 0, columnspan = 2, padx = 2, pady = 10)
     
     # ----------------------
     #  Control Buttons View
