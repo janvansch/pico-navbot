@@ -15,7 +15,7 @@ from machine import Pin, UART, I2C, PWM, Timer
 import _thread
 import utime
 import math
-import ujson
+import json
 import sys
 
 # ========================
@@ -36,7 +36,10 @@ led = Pin(25, Pin.OUT)
 # Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (orange)
 # Module powerred by 5v bus, but RX and TX powerred by internal 3.3v regulator
 
-uart = UART(0, 9600)
+uart = UART(0, baudrate=9600, parity=None, stop=1, bits=8, tx=Pin(0), rx=Pin(1))
+# init() method was dropped in the rp2 port.
+# uart = UART(uart_num, 9600, parity=None, stop=1, bits=8, rx=rxPin, tx=txPin)
+# init is performed at instantiation
 
 # --------------------------------
 #  I2C channel for Compass module
@@ -109,28 +112,31 @@ left_reverse = Pin(21, Pin.OUT) # L298N IN1 green left reverse
 servo_pwm = PWM(Pin(22)) # yellow
 servo_pwm.freq(50)
 
-# ---------------------
-#  Define timer object
-# ---------------------
+# ----------------------
+#  Define timer objects
+# ----------------------
 
-timer = Timer()
+timer_1 = Timer()
+timer_2 = Timer()
 
 # -----------------------------
 #  Initialise global variables
 # -----------------------------
 
 # Note:
-# Variables declared outside of a function is global by default.
-# Variables declared inside a function is local by default.
+# Variables declared outside of a function are global by default.
+# Variables declared inside a function are local by default.
 # Use the "global" keyword to read and write a global variable inside a function.
 
 second_thread = True
+obstacle = False
 front_left_motor_count = 0
 front_right_motor_count = 0
 rear_left_motor_count = 0
 rear_right_motor_count = 0
 avg_heading = 0
-obstacle = False
+leg_num = 0
+drive_state = ''
 
 # ------------
 #  Constants:
@@ -198,10 +204,10 @@ def reset_obstacle():
     global obstacle
     obstacle = False
 
-# Navigation state
+# # Navigation state
 
-def switch_nav_mode():
-    pass
+# def switch_nav_mode():
+#     pass
 
 def read_raw_data(addr):
     
@@ -227,14 +233,43 @@ def read_raw_data(addr):
 # ====================
 
 #
-# Process data received on UART-0 channel received dataprocess_rx,
+# Process data received on UART-0 channel.
 #
 
-def process_rx():
-    pass
+# def process_rx():
+    
+#     global route_cmd
+#     global start_cmd
+#     global stop_cmd
+#     bt_rx_cmd = {}
 
+#     bt_rx_cmd = receive_data()
+
+#     print("Command received: ", bt_rx_cmd)
+    
+#     # msg_body = {
+#     #   'type' : 'NAV',
+#     #   'data' : [{'leg' : 99, 'head' : 999, 'dist' : 999} ... ]
+#     # }
+#     # msg_body = {'type' : 'GO','data' : []}
+#     # msg_body = {'type' : 'STOP','data' : []}
+
+#     if bt_rx_cmd['type'] == 'NAV':
+#         route_cmd = bt_rx_cmd['data']
+#         print("Route data: ", route_cmd)
+        
+#     elif bt_rx_cmd['type'] == 'GO':
+#         start_cmd = True
+#         stop_cmd = False
+#         print("Go: start - ", start_cmd, "stop: ", stop_cmd)
+
+#     elif bt_rx_cmd['type'] == 'STOP':
+#         stop_cmd = True
+#         start_cmd = False
+#         print("STOP: start - ", start_cmd, "stop: ", stop_cmd)
+    
 # -------------------------------------
-#  Motor rotation sensor slot counters
+#  Wheel rotation sensor slot counters
 # -------------------------------------
 
 def front_left_motor_counter(pin):
@@ -259,7 +294,7 @@ def rear_right_motor_counter(pin):
 
 # When an obstacle is detected set obstacle flag
 
-def obstacle(pin):
+def set_obstacle(pin):
     global obstacle
     obstacle = True
     print("*** IRQ source: ", pin)
@@ -319,34 +354,65 @@ def monitor_heading():
 #  Hardware Control
 # ==================
 
-# -----------------------------------
-#  Bluetooth Communication Functions
-# -----------------------------------
+# -----
+#  LED
+# -----
+def blink(num, on, off):
+    for i in range(num):
+        led.value(1)
+        utime.sleep(on)
+        led.value(0)
+        if i < num - 1:
+            utime.sleep(off)
 
-# nav_data = {
-#     "leg_num" : leg,
-#     "leg_heading" : leg_heading,
-#     "leg_distance" : leg_distance,
-#     "nav_status" : nav_status,
-#     "heading : avg_heading             ok
-#     "travel_dist" : distance,          ok
-#     "remaining" : dist_remaining,
-#     "lf_count" : lf_count,
-#     "rf_count" : rf_count,
-#     "lr_count" : lr_count,
-#     "rr_count" : rr_count,
-#     "sonic_dist : sonic_dist
-# }
-
-# bt_data = ujson.dumps(nav_data)
+# ---------------------
+#  Bluetooth Functions
+# ---------------------
 
 def send_data(tx_data):
-    tx_data_json = ujson.dumps(tx_data)
-    uart.write(tx_data_json)
+    tx_data_json = json.dumps(tx_data)
+    # bt_data = b'{$tx_data_json} + \r\n'
+    bytes_sent = uart.write(tx_data_json)
+    # write(buf) = write a buffer of bytes to bus 
+    # 7 or 8 bit characters use one byte
+    # 9 bit characters use two bytes
+    # buf must have an even number of bytes
+    # Returns the number of bytes writen
 
 def receive_data():
+    # read() = read all available characters
+    # read(10) = read 10 characters, returns a bytes object
+    # readline() = reads a line, ending in a newline character
+    # readinto(buf) = read and store into given buffer
+    # any() = returns number of characters waiting
+    # on timeout none is returned
+    
     rx_data = uart.readline()
-    return rx_data
+    print("rx_data: ", rx_data, type(rx_data))
+    
+    if rx_data is None:
+        return ''
+    
+    return json.loads(rx_data)
+
+def send_progress(timer_2):
+    progress = {}
+    progress = {
+        'leg_n' : leg_num,
+        #'leg_h' : leg_heading, # why? As Command knows the route all it is the leg to know the headingneeds
+        #'leg_d' : leg_distance, # why?
+        'state' : drive_state,
+        't_head' : avg_heading,
+        #'t_dist' : avg_distance, # why? can work this out from the counters
+        'lf_c' : front_left_motor_count,
+        'rf_c' : front_right_motor_count,
+        'lr_c' : rear_left_motor_count,
+        'rr_c' : rear_right_motor_count,
+        's_dist' : sonic_distance
+    }
+
+    send_data(progress)
+    print("Progress message: ", progress)
 
 # ------------------------
 #  Sonic Sensor Functions
@@ -360,7 +426,8 @@ def get_distance():
     signaloff = 0
     signalon = 0
     
-    #Pause for two milliseconds to ensure the previous setting has completed
+    #Pause for two milliseconds to ensure 
+    # the previous setting has completed
     utime.sleep_us(2)
     
     trigger.high()
@@ -370,13 +437,13 @@ def get_distance():
     utime.sleep_us(5)
     trigger.low()
 
-    # Create a while loop to check whether the echo pin is 0
-    # and record the time
+    # Create a while loop to check whether the  
+    # echo pin is 0 and record the time
     while echo.value() == 0:
         signaloff = utime.ticks_us()
 
-    # Create a while loop to check Whether the echo pin value is 1
-    # and then record the time
+    # Create a while loop to check Whether the echo 
+    # pin value is 1 and then record the time
     while echo.value() == 1:
         signalon = utime.ticks_us()
 
@@ -391,29 +458,30 @@ def get_distance():
 
     return distance
 
-def sonic_sense(timer):
+def sonic_sense(timer_1):
+        
     # Determine current free distance
-    distance = get_distance()
-    print('---> Sensor distance is： ', distance, 'cm')
-    tx_data = { "distance" : distance }
-    send_data(tx_data)
+    global sonic_distance
+    sonic_distance = get_distance()
+    print('---> Sensor distance is: ', sonic_distance, 'cm')
+    
     # If free distance is limited stop
-    if distance < 5:
+    if sonic_distance < 5:
         stop()
         #suspend timer
-        timer.deinit()
+        timer_1.deinit()
         led.on()
         print('obstacle within 5cm')
         utime.sleep(0.5)
         led.off()
-        while distance < 5:
+        while sonic_distance < 5:
             led.on()
             utime.sleep(0.5)
             led.off()
             utime.sleep(0.5)
             distance = get_distance()
         #start timer again
-        timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+        timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
 # -------------------------
 #  Servo Control Functions
@@ -465,6 +533,43 @@ def angle_servo(angle):
 #  Motor Control Functions
 # -------------------------
 
+# Speed Control
+
+def set_speed(speed):
+    
+    # Forward drive speed settings are slow, medium, economy and full
+    # Define speed levels:
+    speeds = {
+        'slow' : 2,
+        'medium' : 5,
+        'economy' : 8,
+        'full' : 10
+    }
+    
+    # Determine speed level:
+    level = speeds[speed]
+    
+    
+    # The motor operating voltage is 3-6 volts
+    # The max duty cycle is 65025, power is on 100% of the cycle, 6v. 
+    # A 50% duty cycle is 32513 rounded, power is on 50% of the time, 3v.
+    # levels = 10
+    # max_duty = 65025 # 1111111111111111 = 65535?
+    # min_duty = 32513
+    # duty_range = max_duty - min_duty
+    # duty = int((level/levels) * duty_range) + min_duty
+    
+    # Calc duty:
+    duty = int((level/10) * (65025 - 32513)) + 32513
+    
+    # Set duty:
+    left_pwm.duty_u16(duty)
+    right_pwm.duty_u16(duty)
+    
+    print ("--- Motors PWM duty set")
+    
+    return duty
+
 # Drive states
 
 def stop():
@@ -474,15 +579,17 @@ def stop():
     left_forward.low()
     right_forward.low()
 
-def forward():
+def forward(speed):
     print(">>> Set FORWARD >>>")
+    set_speed(speed)
     right_reverse.low()
     left_reverse.low()
     left_forward.high()
     right_forward.high()
     
-def reverse():
+def reverse(speed):
     print("<<< Set REVERSE <<<")
+    set_speed(speed)
     right_forward.low()
     left_forward.low()
     left_reverse.high()
@@ -509,45 +616,7 @@ def turn_right():
     left_reverse.low()
     right_reverse.high()
     left_forward.high()
-    
-# Speed Control
-
-def duty_cycle(level):
-    # The motor operating voltage is 3-6 volts
-    # The max duty cycle is 65025, power is on 100% of the cycle, 6v. 
-    # A 50% duty cycle is 32513 rounded, power is on 50% of the time, 3v.
-    levels = 10
-    max_duty = 65025 # 1111111111111111 = 65535?
-    min_duty = 32513
-    duty_range = max_duty - min_duty
-    duty = int((level/levels) * duty_range) + min_duty
-    return duty
-
-def set_speed(speed):
-    # Forward drive speed settings are slow, medium, economy and full
-    
-    duty = 0
-            
-    if speed == 'slow':
-        duty = duty_cycle(2)
-        
-    elif speed == 'medium':
-        duty = duty_cycle(5)
-        
-    elif speed == 'economy':
-        duty = duty_cycle(8)
-        
-    elif speed == 'full':
-        duty = duty_cycle(10)
-        
-    if duty > 0:
-        left_pwm.duty_u16(duty)
-        right_pwm.duty_u16(duty)
-       #print ("--- Motors PWM duty set")
-        
-    else:
-        print ("*** ERROR - invalid speed ***")
-        
+     
 # ===============
 #  Drive Control
 # ===============
@@ -556,21 +625,21 @@ def set_speed(speed):
 # This must be done before the start of a drive while the bot is still stationary
 # in order to avoid conflicts between this and the IRQ of the motor turn pulse counter
 #
-def reset_front_left_motor_counter():
-    global front_left_motor_count
-    front_left_motor_count = 0
-
-def reset_front_right_motor_counter():
-    global front_right_motor_count
-    front_right_motor_count = 0
-
-def reset_rear_left_motor_counter():
-    global rear_left_motor_count
-    rear_left_motor_count = 0
-
-def reset_rear_right_motor_counter():
-    global rear_right_motor_count
-    rear_right_motor_count = 0
+# def reset_front_left_motor_counter():
+#     global front_left_motor_count
+#     front_left_motor_count = 0
+# 
+# def reset_front_right_motor_counter():
+#     global front_right_motor_count
+#     front_right_motor_count = 0
+# 
+# def reset_rear_left_motor_counter():
+#     global rear_left_motor_count
+#     rear_left_motor_count = 0
+# 
+# def reset_rear_right_motor_counter():
+#     global rear_right_motor_count
+#     rear_right_motor_count = 0
 
 def calc_click_distance():
     # Wheel diameter in mm
@@ -588,92 +657,84 @@ def calc_click_distance():
 #
 #  Convert distance (cm) into slots count
 #
-def calc_clicks(distance_cm):
-    #print ("--- Convert distance to clicks")
-    distance_mm = distance_cm * 10
-    clicks = int(distance_mm / calc_click_distance())
-    #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
-    return clicks
+# def calc_clicks(distance_cm):
+#     #print ("--- Convert distance to clicks")
+#     distance_mm = distance_cm * 10
+#     clicks = int(distance_mm / calc_click_distance())
+#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
+#     return clicks
 
-#
-#  Convert clicks counted to distance travelled
-#
-def calc_distance(clicks):
-    distance_mm = clicks * calc_click_distance()
-    distance_cm = distance_mm / 10
-    return distance_cm
+# #
+# #  Convert clicks counted to distance travelled
+# #
+# def calc_distance(clicks):
+#     distance_mm = clicks * calc_click_distance()
+#     distance_cm = distance_mm / 10
+#     return distance_cm
 
 
 def target_drive(target_distance):
     #
     #  Drive on target heading for required distance
     #
+    # Note:- Distance is in clicks
+    
     print("--- Start drive to target")
     
-    distance_remaining = 0
+    near_target = False
+    avg_distance = 0
     
     # Reset motor counters
-    reset_front_left_motor_counter()
-    reset_front_right_motor_counter()
-    reset_rear_left_motor_counter()
-    reset_rear_right_motor_counter()
+    global front_left_motor_count
+    front_left_motor_count = 0
+ 
+    global front_right_motor_count
+    front_right_motor_count = 0
 
-    # Convert distance into encoder slots
-    clicks = calc_clicks(target_distance)
-        
-    print("--- Distance to target: ", target_distance, " / Clicks: ", clicks)
+    global rear_left_motor_count
+    rear_left_motor_count = 0
+ 
+    global rear_right_motor_count
+    rear_right_motor_count = 0
     
-    # Set speed
-    #print ("--- Set speed")
-    speed = "full"
-    set_speed(speed)
-    print ("--- Speed set to ", speed)
+    print ("--- Counters reset")
     
     # Drive forward
-    print ("--- Drive forward")
-    forward()    
-    near_target = False
-    
-    # Continue forward while clicks counter is less than distance clicks
-    while front_left_motor_count < clicks:
+    forward('economy')
+    print ("--- Forward drive started")
         
-        #print("Heading: ", avg_heading)
-        #print("==> Front Right Motor Count: ", front_right_motor_count)
-        #print("==> Front Left Motor Count: ", front_left_motor_count)
+    # Continue while average distance is less than target distance
+    while avg_distance < target_distance:
         
-        ##############################
-        # if course_deviation_right:
-        #     slow_left()
-        # if course_deviation_left:
-        #     slow_right()
-        ##############################
-                        
         if obstacle:
             
-            # IRQ - obstacle flag set, stop target drive
+            # Obstacle flag set, stop target drive
             stop()
-            print("--- Obstacle encountered, target drive suspended")
-            reset_obstacle()
             
             # A detour from original couse is required to avoid an obstacle
-            # What is the remaining distance to the target?
-            average_clicks = (front_right_motor_count + front_left_motor_count) / 2
-            distance_remaining = target_distance - calc_distance(average_clicks)
+            print("--- Obstacle encountered, target drive suspended")
+            reset_obstacle()
             break
         
-        if (front_left_motor_count / clicks) * 100 > 80.0 and not near_target:
+        if (avg_distance / target_distance) * 100 > 80.0 and not near_target:
+            
             # Slow down when 80% complete  
             near_target = True
-            set_speed('medium')
-            print("--- slow down, almost at target")
+            forward('medium')
+            print("--- Slowed down, almost at target")
+        
+        avg_distance = (
+                front_left_motor_count +
+                front_right_motor_count +
+                rear_left_motor_count +
+                rear_right_motor_count) / 4
 
-    # Destination reached, counter = clicks, stop
+    # End of while, destination reached
     stop()
-
-    print("==> Front Right Motor Count: ", front_right_motor_count)
-    print("==> Front Left Motor Count: ", front_left_motor_count)
-
-    return distance_remaining
+    
+    print("==> Average click count: ", avg_distance)
+    
+    return avg_distance
 
 def detour_drive(side):
     # If the bot made a turn to the right the target is on the left.
@@ -683,18 +744,22 @@ def detour_drive(side):
     
     target_blocked = True
 
-    print("*** Detour Drive Started ***")
+    print("=== Detour Drive Started ===")
         
     # Reset motor counters to record detour drive distance
-    reset_front_left_motor_counter()
-    reset_front_right_motor_counter()
-    reset_rear_left_motor_counter()
-    reset_rear_right_motor_counter()
-    
-    # Slowly drive forward
-    set_speed('slow')
-                                             
-    forward()
+    global front_left_motor_count
+    front_left_motor_count = 0
+ 
+    global front_right_motor_count
+    front_right_motor_count = 0
+
+    global rear_left_motor_count
+    rear_left_motor_count = 0
+ 
+    global rear_right_motor_count
+    rear_right_motor_count = 0
+                          
+    forward('slow')
 
     while target_blocked:
         
@@ -719,7 +784,11 @@ def detour_drive(side):
         
     stop()
     # Record distance travelled on detour
-    distance = (front_right_motor_count + front_left_motor_count) / 2
+    avg_distance = (
+                front_left_motor_count +
+                front_right_motor_count + 
+                rear_left_motor_count +
+                rear_right_motor_count) / 4
         
     return target_blocked
 
@@ -739,7 +808,7 @@ def read_compass():
 #     new_target_distance = 100
 #     return new_target_distance
 
-def detour_heading(turn_angle):
+def deviation_heading(turn_angle):
     
     # Read current compass heading
     current_heading = read_compass()
@@ -752,86 +821,98 @@ def detour_heading(turn_angle):
     else:
         heading = current_heading + turn_angle
 
-    print("Detour heading: ", detour_heading)
+    print("Detour heading: ", heading)
     
     return heading
 
-def best_detour_angle():
-    # To avoid and obstacle use the sonic sensor to scan for open space
-    # in a 180 degee arc at 10 degree intervals
+def best_deviation_angle():
+    
+    # The deviation angle is the angle of change in
+    # in the current heading direction
+    
+    # Stop scan timer
+    timer_1.deinit()
+    
+    print("---> Sonic scan timer stopped")
 
-    # Stop Sonic Scan Timer
-    print("--- Stop Timer")
-    timer.deinit()
-
-    scan_arc = 180
-    scan_angle = -90
     free_distance = 0
     best_distance = 0
-    correction = 10 # the actual scan arc is not 180 on the servo, don't know why
+    best_angle = 0
     
-    while scan_arc >= 0:
-        angle_servo(scan_arc)
-        print("--- scan", scan_angle)
+    # Find best detour direction using the sonic sensor to scan
+    # turn angle with most open space in steps of 10 degrees
+    for scan_angle in range ( 10, 170, 10):
+        # the actual scan arc is not 180 on the servo, don't know why
+        
+        print("Scan angle: ", scan_angle)
+        
+        angle_servo(scan_angle)
         free_distance = get_distance()
-        print("--- Free distance = ", free_distance)
+        deviation_angle = scan_angle - 90
+        
+        print("Deviation angle: ", deviation_angle, "Free distance: ", free_distance)
         
         if free_distance > best_distance:
+            best_angle = deviation_angle
             best_distance = free_distance
-            if scan_angle < correction:
-                best_angle = scan_angle + 10
-            elif scan_angle > correction:
-                best_angle = scan_angle - 10
-            else:
-                best_angle = 0 # i.e. forward
-            
-        scan_arc -= 10
-        scan_angle += 10
-    
-    print( "--- The best turn angle is ", best_angle, "deg with a free distance of: ", best_distance, "cm")
+                
+    print(f"The best deviation angle is {best_angle} deg, with a free distance of {best_distance} cm")
 
-    # set ultra sound sensor to scan forward
+    # set to scan straight ahead
     angle_servo(90)
 
-    # Start Sonic Scan Timer
-    print("--- Start Timer")
-    timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    # Start scan timer again
+    timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    
+    print("--- Sonic scan timer started")
 
     return best_angle
 
 def turn_to_heading(req_heading):
-    #
-    # For testing only
-    #
+    
+    print ("--- Start turn to heading ---")
+    
+    ####################
+    # For testing only #
+    ####################
     req_heading = 90
 
     # Execute turn
-    print ("--- Turn to heading")
+    
     current_heading = read_compass()
+    print ("---> Compass heading: ", current_heading)
+    
     if current_heading > req_heading:
+        
         if req_heading < current_heading - 180:
-            turn_right('slow')
             while read_compass() != req_heading:
-                pass
+                turn_right()
             stop()
+            
         else:
-            turn_left('slow')
             while read_compass() != req_heading:
-                pass
+                turn_left()
             stop()
+            
     elif current_heading < req_heading:
+        
         if req_heading > current_heading + 180:
-            turn_left('slow')
+            turn_left()
             while read_compass() != req_heading:
                 pass
             stop()
+            
         else:
-            turn_right('slow')
+            turn_right()
             while read_compass() != req_heading:
                 pass
             stop()
+            
     else:
+        
         print("--- On course, no turn required")
+    
+    return
 
 def verify_heading(req_heading, distance_remaining, current_speed):
 
@@ -857,10 +938,10 @@ def verify_heading(req_heading, distance_remaining, current_speed):
             turn = 'sharp'
             
         if req_heading < heading:
-            fwd_left_turn(speed, turn)
+            turn_left()
             
         elif req_heading > heading:
-            fwd_right_turn(speed, turn)
+            turn_right()
     
     set_speed(current_speed)
 
@@ -902,7 +983,6 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
         deviation_angle = 360 - deviation_angle
             
     if deviation_angle == 180:
-        
         # Target heading won't change. Only the target distance which would
         # equal current target distance plus detour drive distance
         # so the calculation of a new target heading is not required
@@ -945,11 +1025,11 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
     print(":--> Target turn angle: ", target_turn_angle)
     
     # calc target heading using current compass heading    
-    new_target_heading = calc_heading(target_turn_angle)
+    new_target_heading = deviation_heading(target_turn_angle)
     
     print(":--> New target heading: ", new_target_heading)
         
-        # calc target heading without using compass heading
+    # calc target heading without using compass heading
     #         if detour_angle > 0:
     #             new_target_heading_2 = detour_heading - target_turn_angle
     #         
@@ -962,40 +1042,49 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
     #                 target_heading_2 = target_heading_2 - 360
 
     target_position = {
-        "heading": new_target_heading,
-        "distance": new_target_distance}
+        'heading': new_target_heading,
+        'distance': new_target_distance}
     
     return target_position
 
 def detour(target_heading, target_distance):
     
     print ('*** Detour Started ***')
+
+    global front_left_motor_count
+    global front_right_motor_count
+    global rear_left_motor_count
+    global rear_right_motor_count
+
+    target_pos = {}
+
     # Plan and drive detour
     target_blocked = True
     
     while target_blocked:
                
         # Determine direction with best free distance
-        # if detour angle > 0 turn right else turn to the left
-        detour_angle = best_detour_angle()
-        # course deviation angle = the detour angle
+        print("Determine best detour heading")
         
+        deviation_angle = best_deviation_angle()
+        # The angle by which the detour will deviate from the current heading
+        # This angle is required to calculate the distance to target using
+        # the Cosine rule
+        
+        print(":--> Deviation angle: ", deviation_angle)
+                
         # Determine detour heading, current heading + detour angle
         # Use compass to determine current heading
-        heading = detour_heading(detour_angle)
+        detour_heading = deviation_heading(deviation_angle)
         
-        print(" :--> Detour heading: ", heading)
+        print(":--> Best detour heading: ", detour_heading)
         
-        turn_to_heading(heading)
+        turn_to_heading(detour_heading)
         
-        deviation_angle = detour_heading - target_heading
-        # The angle by which the detour deviates from the target's heading
-        # This angle is required to calculate the distance to target using the Cosine rule
-        
-        print( ":--> Deviation angle: ", deviation_angle)
-        
+        print(":--> Turned to detour heading")
+                
         # Determine obstacle side
-        if detour_angle > 0:
+        if deviation_angle > 0:
             # turning right, target would be to the left
             target_side = "left"
         else:
@@ -1005,180 +1094,317 @@ def detour(target_heading, target_distance):
         print( ":--> Target side: ", target_side)
         
         # Drive on detour heading
-        target_blocked = drive_detour(target_side)
+        target_blocked = detour_drive(target_side)
         
         # If the detour drive ends and the target side is still blocked an
         # obstacle was encountered during the detour drive.
         # Calculate a new target heading and start a new detour
         
         # Calculate average clicks recorded during detour drive
-        average_clicks = (front_right_motor_count + rear_left_wheel_count) / 2
+        detour_distance = (
+            front_left_motor_count +
+            front_right_motor_count + 
+            rear_left_motor_count +
+            rear_right_motor_count) / 4
             
-        # calculate distance travelled during detour
-        detour_distance = calc_distance(average_clicks)
-        
-        print( ":--> Detour distance: ", detour_distance)
+        # What is the heading and distance to the target at
+        # the current detour location?
+        # If the detour was successful this will be the target
+        # position information used to drive to the target.
+        # If not this will be the dead reconning point form
+        # which the next detour drive will start from
+        target_pos = target_position(
+                deviation_angle,
+                detour_distance,
+                target_distance,
+                target_side)
                 
-        target_position = target_position(deviation_angle, detour_distance, target_distance, obstacle_side)
-        # At the current detour location of the NavBot what is the heading and
-        # distance to the target? If the detour was successful this will be the
-        # target position information used to drive to the target. If not this
-        # will be the dead reconning point form which the next detour drive will
-        # start
-        
-        target_heading = target_position['heading']    
-        target_distance = target_position['distance']
+        target_heading = target_pos['heading']    
+        target_distance = target_pos['distance']
         
         print( ":--> New target heading: ", target_heading, " and distance: ", target_distance)
             
-    print( "---> Detour avoided, resume drive to target")    
+    print( ":--> Detour avoided, resume drive to target")    
     
-    return target_position
+    return target_pos
 
 def drive_leg(target):
     
-    heading = target['heading']
-    distance = target['distance']
+    global drive_state
+    drive_state = 'target'
     
-    while distance > 0:
+    heading = target['head']
+    distance_cm = target['dist']
+    leg_state = ''
+        
+    # Convert distance in cm to distance in clicks
+    # From here onward distances will be in clicks
+    # ============================================
+    distance = int((distance_cm * 10) / calc_click_distance())
+    
+    while leg_state != 'complete':
 
         # Turn to required heading
-        print("=== Current heading: ", avg_heading)
+        print("---> Current heading: ", avg_heading)
         turn_to_heading(heading)
 
         # Drive to target
-        print ('=== Drive to target')
-        distance = target_drive(distance)
-        
-        
-        if distance > 0:
-            # If distance is greater than zero the target was not reached
-            # because an obstacle was encountered. A detour is required.
+        print ('---> Drive to target')
+        drive_dist = target_drive(distance)
+                
+        if drive_dist != distance:
             
-            print( ":--> Target direction obstructed, detour required")
+            # If distance is greater then target was not reached
+            # because an obstacle was encountered.
+            # A detour action is required.
+                        
+            print( "---> Target direction obstructed, detour required")
+            drive_state = 'detour'
             
-            # Execute detour and return heading and distance to target once obstacle has been avoided.
-            new_target = detour(heading, distance)
+            # The remaining distance is required to calculate
+            # target heading and distance from detour point
+            remaining_dist = distance - drive_dist
+            
+            # Execute detour and return heading and distance
+            # to target once obstacle has been avoided. This
+            # will be used to start a new target drive
+            new_target = detour(heading, remaining_dist)
             
             heading = new_target['heading']
             distance = new_target['distance']
+            drive_state = 'target'
             
         else:
-            print ('*** Target Reached ***')
+            print ('--- Target Reached ---')
             leg_state = 'complete'
 
     return leg_state
 
-def manual_ctrl():
-    pass
 
-def connect():
-    pass
-
-def request(param):
-    # In the future this will be replaced with code that obtains
-    # the information from the command module
-    
-    # option two would be that the command module sends the information
-    # after establishing connecting with NavBot
-    
-    received = False
-    
-    while not received:
-        if param == "mode":
-            param_val = "auto"
-            received = True
-            
-        elif param == "route":
-            # The route information will be specified in the control data received
-            # A route contains one or more legs or waypoints
-    
-            # The following creates a dummy route with one leg for test purposes
-            route = []
-            leg = {
-                "heading" : 90,
-                "distance" : 400
-            }
-            route.append(leg)
-            param_val = route
-            received = True
-    
-        elif param == "start":
-            param_val = "go"
-            received = True
-        
-    return param_val
 
 def main():
     
-    # The Plan:
-    # When NavBat starts up it will connect to Raspberry Pi running the control GUI.
-    # Then it will wait for instructions.
-    # The first instruction will set the operating mode.
-    # This would be either "auto" or "manual".
-    # If "auto" then NavBot will wait for route data. A route will consist of one or 
-    # more legs which consists of a heading and a distance.
-    # Once the nav data has been received the NavBot will wait for the start command to
-    # start driving the route as specified.
-    # If "manual" then NavBot will wait for joystick input from the user. This input
-    # could be either forward, turn left, turn right or reverse. NavBot will report
-    # if it encounters obstacles.
+    # When Navbot starts it waits for connection message
+    # from the Command module. After the Command module
+    # connects it will send this message to the Control
+    # module running on the NavBot.
+    #  
+    # After receiving the connected message the Control
+    # module will wait for route data. After receiving
+    # the route data message from the Command module the
+    # Control module will wait for a go message to start
+    # the drive.
+    # 
+    # On receiving the go command the Control module will
+    # start executing the routing instructions received 
+    # driving the NavBot towards the target.
+    # 
+    # During the drive the Navbot will transmit progress
+    # data back to command module. The Command module
+    # will display this data.
+    #
+    # The stop command is not implemented at this stage
+    # as MicroPython does not provide for an UART IRQ
     
-    # New Plan:
-    # When Navbot starts it waits for connection from Command Module
-    # Once connected it waits for a drive plan
-    # After receiving the drive plan it waits for execute command
-    # When the execute command is received it will start executing the plan
-    # It will transmit execution data back to command module
-    
-    
-    print ('*** Main START ***')
-    
-    connect()
-    print('--- Connected')
-    
-    nav_mode = request("mode")
-    print('--- Mode set')
-    
-    if nav_mode == "auto":
+    # Types of Command Messages:
+    # (a) Connection msg_body = {'type' : 'CON','data' : []}
+    # (b) Navigation data msg_body = {
+    #       'type' : 'NAV',
+    #       'data' : [{'leg' : 99, 'head' : 999, 'dist' : 999} ... ]
+    #     }
+    # (c) Go msg_body = {'type' : 'GO','data' : []}
+    # (d) Stop msg_body = {'type' : 'STOP','data' : []}
+
+    print ('--- Main START ---')
+
+    utime.sleep(4)
+
+    global bot_state
+    bot_state = ''
+    con_cmd = False
+    nav_cmd = False
+    go_cmd = False
+    command_cmd = {}
+    route_cmd = {}
+            
+    # Ready for connection from command module
+    bot_state = 'Command'
+    print("Ready for command connection")
+    print("Waiting for connection confirmation command")
+
+    while con_cmd == False:
+        # Indicate by slow/fast blinking LED - 
+        # blink(num, time on, time off)
+        blink(1, 0.3, 0)
         
-        route = request("route")
-        print('--- Route data received')
+        command_cmd = receive_data()
+
+        if command_cmd != '':
+            print("Command received: ", command_cmd)
+
+            if command_cmd['type'] == 'CON':
+                con_cmd = True
+        else:    
+            utime.sleep(2)
+
+    # Ready to receive route data
+    bot_state = 'Connected'
+    print("Command module connected")  
+    print("Waiting for route data")
+
+    while nav_cmd == False:
+        # Indicate by slow/fast blinking LED
+        blink(2, 0.3, 0.2)
         
-        start = request("start")
-        print('--- Start received')
+        command_cmd = receive_data()
+
+        if command_cmd != '':
+            print("Command received: ", command_cmd)
+
+            if command_cmd['type'] == 'NAV':
+                nav_cmd = True
+                route_cmd = command_cmd['data']
+                print("Route Data Received: ", route_cmd)
         
-        # if start = "abort":
-        # throw exception
+        else:    
+            utime.sleep(2)
+    
+    # Ready to receive go command
+    bot_state = 'Ready'
+    print("Route data received")  
+    print("Ready for GO command")
 
-        # Self navigation mode selected
-        print ('*** Self Navigation Mode Started ***')
+    while go_cmd == False:
+        # Indicate by slow/fast blinking LED
+        blink(3, 0.3, 0.2)
+        
+        command_cmd = receive_data()
 
-        # Start executing route
-        leg_count = 0
-        for leg in route:
-            leg_count += 1
-            print('--- Leg: ', leg_count)
-            leg_state = drive_leg(leg)
+        if command_cmd != '':
+            print("Command received: ", command_cmd)
 
-            # Process leg result
-            if leg_state == "complete":
-                print ('*** Leg Complete ***')
+            if command_cmd['type'] == 'GO':
+                go_cmd = True
+                        
+        else:    
+            utime.sleep(2)
+    
+    # Start executing route
+    bot_state = 'go'
+    print("Go command received")  
+    print("Drive route")
+    
+    # Start reading compass to monitor heading 
+    start_heading_monitor()
+    print('---> Heading monitor started')
+    utime.sleep(1)
+    print('---> Heading: ', avg_heading)
+    
+    # Test servo
+    cycle_servo()
+    
+    # Configure timer interrupt event for sonic sensor
+    timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    print('---> Sonic timer started')
+    utime.sleep(2)
 
-            elif leg_state == "halt":
-                print ('*** Failed to reach objective ***')
-                break
+    # Configure timer interrupt event for progress update
+    timer_2.init(freq=1, mode=Timer.PERIODIC, callback=send_progress)
+    print('---> Progress timer started')
+    utime.sleep(2)
+    
+    # Start navigating drive
+    for leg in route_cmd:
 
-            else:
-                print ('*** ERROR - unexpected end to route ***')
-                break
+        print('---> Leg: ', leg)
+        
+        global leg_num #, leg_heading, leg_distance
+        leg_num = leg['leg']
+        # leg_heading = leg['head'] From leg Command knows this as it knows the route
+        # leg_distance = leg['dist'] From leg Command knows this as it knows the route
+        
+        # Drive to leg target
+        leg_state = drive_leg(leg)
 
-    # Manual control selected
-    elif nav_mode == "manual":
-        print ('*** Manual Navigation Mode Selected ***')
-        manual_ctrl()
+        # Process leg drive result
+        if leg_state == "complete":
+            print (f'---> Leg {leg_num} complete')
 
-    print ('*** Main END ***')
+        elif leg_state == "halt":
+            print (f'--- Failed to reach leg {leg_num} objective ---')
+            break
+
+        else:
+            print ('--- ERROR - unexpected end to route ---')
+            break
+
+    print ('--- Main END ---')
+
+# ===================
+#  Execution Control
+# ===================
+def navbotMain():
+    print('=== NavBot Start ===')
+    try:
+        # Start main loop
+        print('--- Start Main Loop ---')
+        main()
+        print('--- Main Loop Complete ---')
+        timer_1.deinit()
+        timer_2.deinit()
+        stop_heading_monitor()
+        sys.exit()
+
+    except Exception as ex:
+        # Exception, stop motors
+        stop()
+        print('An exception as occurred!')
+        print(ex)
+        print('=== End Execution ===')
+        timer_1.deinit()
+        timer_2.deinit()
+        stop_heading_monitor()
+        sys.exit()
+
+    except:
+        # Exception, stop motors
+        stop()
+        print('An error has occurred.')
+
+    finally:
+        # Cleanup, stop motors
+        stop()
+        timer_1.deinit()
+        timer_2.deinit()
+        stop_heading_monitor()
+        #sys.exit()
+
+def direct(): 
+    while True:
+        print('=== NavBot Start ===')
+        try:
+            # Start main loop
+            print('--- Start Main Loop ---')
+            main()
+            print('--- Main Loop Complete ----')
+            timer_1.deinit()
+            timer_2.deinit()
+            stop_heading_monitor()
+            sys.exit()
+
+        except:
+            # Exception, stop motors
+            print('An error has occurred.')
+
+        finally:
+            # Cleanup, stop motors
+            stop()
+            timer_1.deinit()
+            timer_2.deinit()
+            print('--- Timers 1 & 2 stopped ---')
+            stop_heading_monitor()
+            print('--- Compass monitor stopped ---')
+            sys.exit()
 
 # ===============================
 #  Interrupts Definition Section
@@ -1187,11 +1413,12 @@ def main():
 # -------------------------------------
 #  Setup IR obstacle sensor interrupts
 # -------------------------------------
-# Monitor front obstacle sensors only. The mid sensors are monitored during
-# a detour drive and the rear sensors will be monitored when reversing
-ir_front_left.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-ir_front_centre.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
-ir_front_right.irq(handler=obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
+# Monitor front obstacle sensors only.
+# The mid sensors are monitored during a detour drive and
+# the rear sensors will be monitored when reversing
+ir_front_left.irq(handler=set_obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
+ir_front_centre.irq(handler=set_obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
+ir_front_right.irq(handler=set_obstacle, trigger=Pin.IRQ_FALLING, hard=True) # obstacle
 
 # ----------------------------------
 #  Set motor turn sensor interrupts
@@ -1205,69 +1432,14 @@ front_right_motor.irq(handler=front_right_motor_counter, trigger=Pin.IRQ_RISING,
 rear_left_motor.irq(handler=rear_left_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
 rear_right_motor.irq(handler=rear_right_motor_counter, trigger=Pin.IRQ_RISING, hard=True)
 
-# ---------------------------------
-#  Configure timer interrupt event
-# ---------------------------------
-
-# timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-
 # -------------------
-#  UART RX interrupt
+#  UART RX interrupt - not available
 # -------------------
-
 # uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
+# MicroPyton does not implement this for the Pico. Only availabe for WiPy.
 
-# ===================
-#  Execution Control
-# ===================
-def navbotMain():
-    try:
-        # Start reading compass to monitor heading 
-        start_heading_monitor()
-        print('--- Heading monitor started')
-        utime.sleep(1)
-        print('--- Heading: ', avg_heading)
-        # Test servo
-        cycle_servo()
-        # Configure timer interrupt event for sonic sensor
-        timer.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-        print('--- Sonic timer started')
-        utime.sleep(5)
-        # Start main loop
-        print('*** Start Main Loop ***')
-        main()
-        print('*** Main Loop Complete ***')
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
-
-    except KeyboardInterrupt:
-        # Abort, stop motors
-        stop()
-        print('CTRL-C received, Abort')
-        print ('*** Reset ***')
-        timer.deinit()
-        stop_heading_monitor()
-        machine.reset()
-
-    except Exception as ex:
-        # Exception, stop motors
-        stop()
-        print('An exception as occurred!')
-        print(ex)
-        print('*** End Execution ***')
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
-
-    except:
-        # Exception, stop motors
-        stop()
-        print('An error has occurred.')
-
-    finally:
-        # Cleanup, stop motors
-        stop()
-        timer.deinit()
-        stop_heading_monitor()
-        sys.exit()
+if __name__ == "__main__":
+    print("%s is being run directly" %__name__)
+    direct()
+else:
+    print("%s is being imported" %__name__)
