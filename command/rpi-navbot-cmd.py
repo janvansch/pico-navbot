@@ -52,28 +52,29 @@ transparency = 1
 # Thread code - must be before the thread setup definition
 def update_data():
 
+    print("=== Thread process running ===")
+
     # Calculate click distance in cm
-    wheel_diameter = 65
+    wheel_diameter = 68 # mm
     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
 
-    print(">>> THREAD: Wheel circumference: ", wheel_circumference)
+    print(">>> THREAD: Wheel circumference: ", wheel_circumference, " mm")
     
     # Encoder slots
     slots = 20
-    distance_per_click = wheel_circumference / (slots)
+    distance_per_click = int(wheel_circumference / slots)
 
-    print(">>> THREAD: Distance per click: ", distance_per_click)
+    print(">>> THREAD: Distance per click: ", distance_per_click, " mm")
         
     # Continiously read NavBot data over connection
     while True:
-        bt_data = sock.recv(1024)
 
-        print(">>> THREAD: Data received: ", bt_data)
+        bt_data = sock.recv(1024)
 
         if bt_data != '':
 
             bot_data = json.loads(bt_data)
-            print(">>> THREAD: received from NavBot", bot_data)
+            print(">>> THREAD: data received - ", bot_data)
 
             # Calculate travel distance
             avg_distance = (
@@ -83,30 +84,30 @@ def update_data():
                     bot_data['rr_c']) / 4
 
             travel_dist = int(avg_distance * distance_per_click) / 10
+            print(">>> THREAD: Distance travelled: ", travel_dist, " cm")
 
             # Get current leg detail
             leg_idx = bot_data['leg_n'] - 1
             curr_leg = routes[int(route_sent)]['legs'][leg_idx]
 
             # Update GUI with progress data received
-            nav_data[0].set(curr_leg['leg'])
-            nav_data[1].set(curr_leg['head'])
-            nav_data[2].set(curr_leg['dist'])
-            nav_data[3].set(bot_data['state'])
-            nav_data[4].set(bot_data['t_head'])
-            nav_data[5].set(travel_dist)
-            nav_data[6].set(bot_data['s_dist'])
-            nav_data[7].set(bot_data['lf_c'])
-            nav_data[8].set(bot_data['rf_c'])
-            nav_data[9].set(bot_data['lr_c'])
-            nav_data[10].set(bot_data['rr_c'])
-            
-            
+            nav_data[0].set(curr_leg['leg']) # Current Route Leg
+            nav_data[1].set(curr_leg['head']) # Current Route Leg Heading
+            nav_data[2].set(curr_leg['dist']) # Current Route Leg Distance
+            nav_data[3].set(bot_data['state']) # Current Navigation Status
+            nav_data[4].set(bot_data['t_head']) # Current Heading
+            nav_data[5].set(travel_dist) # Current Calculated Travel Distance
+            nav_data[6].set(bot_data['s_dist']) # Sonic Sensor Free Distance
+            nav_data[7].set(bot_data['lf_c']) # Left Front Counter
+            nav_data[8].set(bot_data['rf_c']) # Right Front Counter
+            nav_data[9].set(bot_data['lr_c']) # Left Rear Counter
+            nav_data[10].set(bot_data['rr_c']) # Right Rear Counter
+                        
             # Pause for GUI to update and user to read data
-            time.sleep(1)
+            #time.sleep(1)
         else:
             print(">>> THREAD: No progress data")
-            time.sleep(1)
+            time.sleep(0.2)
 
 # --------------------
 #  Define thread task
@@ -283,7 +284,7 @@ def send_start():
         
     # Activate data collection thread
     data_task.start()
-    print("=== Thread process started ===")
+    time.sleep(0.2)
     
     # Send drive route command
     msg_body = json.dumps({'type' : 'GO','data' : []})
@@ -319,7 +320,7 @@ def load_routes():
     global routes
     
     try:
-        with open('routes.data', 'r') as openfile:
+        with open('routes.json', 'r') as openfile:
             routes = json.load(openfile)
             
     except IOError:
@@ -370,7 +371,7 @@ def load_routes():
 def save_routes(routes):
     
     try:
-        with open('routes.data', 'w') as outfile:
+        with open('routes.json', 'w') as outfile:
             json.dump(routes, outfile)
         
         result = 'ok'
@@ -518,9 +519,9 @@ def update_leg():
         messagebox.showinfo("INFO", "Select a leg to update.")
 
     else:
-        # Update route description
-        routes[int(route_idx)]['legs'][int(leg_idx)]['head'] = leg_head_entry.get()
-        routes[int(route_idx)]['legs'][int(leg_idx)]['dist'] = leg_dist_entry.get()
+        # Update leg heading and distance
+        routes[int(route_idx)]['legs'][int(leg_idx)]['head'] = int(leg_head_entry.get())
+        routes[int(route_idx)]['legs'][int(leg_idx)]['dist'] = int(leg_dist_entry.get())
 
         # Write routes list to file
         save_routes(routes)
@@ -1323,13 +1324,3 @@ if __name__ == "__main__":
 #         # Start GUI display
 #         create_main_window()
     create_main_window()
-
-
-
-
-
-
-
-
-
-

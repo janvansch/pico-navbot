@@ -12,3 +12,10 @@ Then field testing to see if the concept and implementation actually works :)
 
 ![Testing](../main/images/Planning.png "Planning")
 
+Added a Command module. It enables the creation, updating and deleting routes and the legs of routes. It also connects to the bot and enables the transmition of a route to the bot. Once the route is loaded the bot can be commanded to drive the route. The module also displays progress information received from the bot during the drive.
+
+![Command Design](../main/images/command.png "Command Planning")
+
+The STOP is not implemented because MicroPython does not provide support for an IRQ on UART
+
+Now the detour navigation must be completed.

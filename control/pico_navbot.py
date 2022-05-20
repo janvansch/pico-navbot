@@ -136,6 +136,9 @@ rear_left_motor_count = 0
 rear_right_motor_count = 0
 avg_heading = 0
 leg_num = 0
+sonic_distance = 0
+wheel_diameter = 68 # mm
+encoder_slots = 20
 drive_state = ''
 
 # ------------
@@ -378,6 +381,7 @@ def send_data(tx_data):
     # 9 bit characters use two bytes
     # buf must have an even number of bytes
     # Returns the number of bytes writen
+    print("Bytes sent", bytes_sent)
 
 def receive_data():
     # read() = read all available characters
@@ -489,7 +493,7 @@ def sonic_sense(timer_1):
 
 def cycle_servo():
     
-    print("--- Test servo")
+    print("--- Servo cycle test")
 
     for position in range (1150, 8650, 50): # range(start, stop, step)
         servo_pwm.duty_u16(position)
@@ -501,7 +505,7 @@ def cycle_servo():
         
     angle_servo(90)
     
-    print("--- Servo test complete")
+    print("--- Servo cycle test complete")
 
 def angle_servo(angle):
 
@@ -528,6 +532,7 @@ def angle_servo(angle):
 
     # Wait for servo to set
     utime.sleep(0.5)
+    return
 
 # -------------------------
 #  Motor Control Functions
@@ -566,34 +571,40 @@ def set_speed(speed):
     left_pwm.duty_u16(duty)
     right_pwm.duty_u16(duty)
     
-    print ("--- Motors PWM duty set")
+    print ("--- Motors PWM duty set ---")
     
     return duty
 
 # Drive states
 
 def stop():
-    print("--- STOP ---")
+    
     right_reverse.low()
     left_reverse.low()
     left_forward.low()
     right_forward.low()
+    
+    print("--- STOPPED ---")
 
 def forward(speed):
-    print(">>> Set FORWARD >>>")
+    
     set_speed(speed)
     right_reverse.low()
     left_reverse.low()
     left_forward.high()
     right_forward.high()
     
+    print(">>> FORWARD set >>>")
+    
 def reverse(speed):
-    print("<<< Set REVERSE <<<")
+    
     set_speed(speed)
     right_forward.low()
     left_forward.low()
     left_reverse.high()
     right_reverse.high()
+    
+    print("<<< REVERSE set <<<")
     
 # Turn states
 
@@ -616,181 +627,6 @@ def turn_right():
     left_reverse.low()
     right_reverse.high()
     left_forward.high()
-     
-# ===============
-#  Drive Control
-# ===============
-#
-# Reset drive distance counters -
-# This must be done before the start of a drive while the bot is still stationary
-# in order to avoid conflicts between this and the IRQ of the motor turn pulse counter
-#
-# def reset_front_left_motor_counter():
-#     global front_left_motor_count
-#     front_left_motor_count = 0
-# 
-# def reset_front_right_motor_counter():
-#     global front_right_motor_count
-#     front_right_motor_count = 0
-# 
-# def reset_rear_left_motor_counter():
-#     global rear_left_motor_count
-#     rear_left_motor_count = 0
-# 
-# def reset_rear_right_motor_counter():
-#     global rear_right_motor_count
-#     rear_right_motor_count = 0
-
-def calc_click_distance():
-    # Wheel diameter in mm
-    wheel_diameter = 65
-    # Encoder slots
-    slots = 20
-    
-    wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
-    
-    distance_per_click = wheel_circumference / (slots)
-    #print ("--- Click distance = ", distance_per_click)
-    
-    return distance_per_click
-
-#
-#  Convert distance (cm) into slots count
-#
-# def calc_clicks(distance_cm):
-#     #print ("--- Convert distance to clicks")
-#     distance_mm = distance_cm * 10
-#     clicks = int(distance_mm / calc_click_distance())
-#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
-#     return clicks
-
-# #
-# #  Convert clicks counted to distance travelled
-# #
-# def calc_distance(clicks):
-#     distance_mm = clicks * calc_click_distance()
-#     distance_cm = distance_mm / 10
-#     return distance_cm
-
-
-def target_drive(target_distance):
-    #
-    #  Drive on target heading for required distance
-    #
-    # Note:- Distance is in clicks
-    
-    print("--- Start drive to target")
-    
-    near_target = False
-    avg_distance = 0
-    
-    # Reset motor counters
-    global front_left_motor_count
-    front_left_motor_count = 0
- 
-    global front_right_motor_count
-    front_right_motor_count = 0
-
-    global rear_left_motor_count
-    rear_left_motor_count = 0
- 
-    global rear_right_motor_count
-    rear_right_motor_count = 0
-    
-    print ("--- Counters reset")
-    
-    # Drive forward
-    forward('economy')
-    print ("--- Forward drive started")
-        
-    # Continue while average distance is less than target distance
-    while avg_distance < target_distance:
-        
-        if obstacle:
-            
-            # Obstacle flag set, stop target drive
-            stop()
-            
-            # A detour from original couse is required to avoid an obstacle
-            print("--- Obstacle encountered, target drive suspended")
-            reset_obstacle()
-            break
-        
-        if (avg_distance / target_distance) * 100 > 80.0 and not near_target:
-            
-            # Slow down when 80% complete  
-            near_target = True
-            forward('medium')
-            print("--- Slowed down, almost at target")
-        
-        avg_distance = (
-                front_left_motor_count +
-                front_right_motor_count +
-                rear_left_motor_count +
-                rear_right_motor_count) / 4
-
-    # End of while, destination reached
-    stop()
-    
-    print("==> Average click count: ", avg_distance)
-    
-    return avg_distance
-
-def detour_drive(side):
-    # If the bot made a turn to the right the target is on the left.
-    # Drive untill the left side is not blocked.
-    # If the bot made a turn to the left the target is on the right.
-    # Drive untill the right side is not blocked.
-    
-    target_blocked = True
-
-    print("=== Detour Drive Started ===")
-        
-    # Reset motor counters to record detour drive distance
-    global front_left_motor_count
-    front_left_motor_count = 0
- 
-    global front_right_motor_count
-    front_right_motor_count = 0
-
-    global rear_left_motor_count
-    rear_left_motor_count = 0
- 
-    global rear_right_motor_count
-    rear_right_motor_count = 0
-                          
-    forward('slow')
-
-    while target_blocked:
-        
-        if obstacle:
-            # IRQ - obstacle flag set, stop detour drive
-            # Another detour required to avoid an obstacle
-            print("--- Obstacle encountered, suspend current detour")
-            reset_obstacle()
-            
-            break
-        
-        # Read side sensor state
-        # Sensor output:
-        #   0 = low, obstacle
-        #   1 = high, no obstacle (5v on sensor line)
-        
-        if side == "left" and ir_mid_left.value() == 1:
-            target_blocked = False
-            
-        if side == "right" and ir_mid_right.value() == 1:
-            target_blocked = False    
-        
-    stop()
-    # Record distance travelled on detour
-    avg_distance = (
-                front_left_motor_count +
-                front_right_motor_count + 
-                rear_left_motor_count +
-                rear_right_motor_count) / 4
-        
-    return target_blocked
 
 # ====================
 #  Navigation Control
@@ -1046,8 +882,124 @@ def target_position(deviation_angle, detour_distance, target_distance, obstacle_
         'distance': new_target_distance}
     
     return target_position
+     
+# ===============
+#  Drive Control
+# ===============
+#
+# Reset drive distance counters -
+# This must be done before the start of a drive while the bot is still stationary
+# in order to avoid conflicts between this and the IRQ of the motor turn pulse counter
+#
+# def reset_front_left_motor_counter():
+#     global front_left_motor_count
+#     front_left_motor_count = 0
+# 
+# def reset_front_right_motor_counter():
+#     global front_right_motor_count
+#     front_right_motor_count = 0
+# 
+# def reset_rear_left_motor_counter():
+#     global rear_left_motor_count
+#     rear_left_motor_count = 0
+# 
+# def reset_rear_right_motor_counter():
+#     global rear_right_motor_count
+#     rear_right_motor_count = 0
 
-def detour(target_heading, target_distance):
+# def calc_click_distance():
+    
+#     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2) # mm
+#     distance_per_click = wheel_circumference / (encoder_slots) # mm
+#     print ("--- Click distance = ", distance_per_click, " mm")
+    
+#     return distance_per_click
+
+#
+#  Convert distance (cm) into slots count
+#
+# def calc_clicks(distance_cm):
+#     #print ("--- Convert distance to clicks")
+#     distance_mm = distance_cm * 10
+#     clicks = int(distance_mm / calc_click_distance())
+#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
+#     return clicks
+
+# #
+# #  Convert clicks counted to distance travelled
+# #
+# def calc_distance(clicks):
+#     distance_mm = clicks * calc_click_distance()
+#     distance_cm = distance_mm / 10
+#     return distance_cm
+
+
+# -------------------------------------------
+#  Drive detour heading to avoid an Obstacle 
+# -------------------------------------------
+ 
+def detour_drive(side):
+
+    # If the bot made a turn to the right the target is on the left.
+    # Drive untill the left side is not blocked.
+    # If the bot made a turn to the left the target is on the right.
+    # Drive untill the right side is not blocked.
+    
+    target_blocked = True
+
+    print("=== Detour Drive Started ===")
+        
+    # Reset motor counters to record detour drive distance
+    global front_left_motor_count
+    front_left_motor_count = 0
+ 
+    global front_right_motor_count
+    front_right_motor_count = 0
+
+    global rear_left_motor_count
+    rear_left_motor_count = 0
+ 
+    global rear_right_motor_count
+    rear_right_motor_count = 0
+                          
+    forward('slow')
+
+    while target_blocked:
+        
+        if obstacle:
+            # IRQ - obstacle flag set, stop detour drive
+            # Another detour required to avoid an obstacle
+            print("--- Obstacle encountered, suspend current detour")
+            reset_obstacle()
+            
+            break
+        
+        # Read side sensor state
+        # Sensor output:
+        #   0 = low, obstacle
+        #   1 = high, no obstacle (5v on sensor line)
+        
+        if side == "left" and ir_mid_left.value() == 1:
+            target_blocked = False
+            
+        if side == "right" and ir_mid_right.value() == 1:
+            target_blocked = False    
+        
+    stop()
+    # Record distance travelled on detour
+    avg_distance = (
+                front_left_motor_count +
+                front_right_motor_count + 
+                rear_left_motor_count +
+                rear_right_motor_count) / 4
+        
+    return target_blocked
+
+# -----------------------------------------
+#  Control detour and calculate new target
+# -----------------------------------------
+
+def make_detour(target_heading, target_distance):
     
     print ('*** Detour Started ***')
 
@@ -1101,7 +1053,7 @@ def detour(target_heading, target_distance):
         # Calculate a new target heading and start a new detour
         
         # Calculate average clicks recorded during detour drive
-        detour_distance = (
+        avg_detour_distance = (
             front_left_motor_count +
             front_right_motor_count + 
             rear_left_motor_count +
@@ -1115,7 +1067,7 @@ def detour(target_heading, target_distance):
         # which the next detour drive will start from
         target_pos = target_position(
                 deviation_angle,
-                detour_distance,
+                avg_detour_distance,
                 target_distance,
                 target_side)
                 
@@ -1128,59 +1080,132 @@ def detour(target_heading, target_distance):
     
     return target_pos
 
-def drive_leg(target):
+# --------------------------------
+#  Drive directly to target point
+# --------------------------------
+
+def target_drive(target_distance):
+    #
+    #  Drive on target heading for required distance
+    #
+    # Note:- Distance is in clicks
+    
+    print("--- Start drive to target")
+    
+    near_target = False
+    avg_distance = 0
+    
+    # Reset motor counters
+    global front_left_motor_count
+    front_left_motor_count = 0
+ 
+    global front_right_motor_count
+    front_right_motor_count = 0
+
+    global rear_left_motor_count
+    rear_left_motor_count = 0
+ 
+    global rear_right_motor_count
+    rear_right_motor_count = 0
+    
+    print ("--- Counters reset")
+    
+    # Drive forward
+    forward('economy')
+    print ("--- Forward drive started")
+        
+    # Continue drive while average distance is less
+    # than target distance and no obstacle detected
+    while avg_distance < target_distance and not obstacle:
+        
+        if (avg_distance / target_distance) * 100 > 80.0 and not near_target:
+            
+            # Slow down when 80% complete  
+            near_target = True
+            forward('medium')
+            print("--- Slowed down, almost at target")
+        
+        avg_distance = (
+                front_left_motor_count +
+                front_right_motor_count +
+                rear_left_motor_count +
+                rear_right_motor_count) / 4
+
+    # End of while
+    
+    # Stop drive, destination reached or obstacle detected
+    stop()
+    
+    if obstacle:
+                
+        # A detour from original couse is required to avoid an obstacle
+        print("--- Obstacle encountered, target drive suspended")
+        reset_obstacle()
+        return 'obstacle'
+    
+    print(">>> Average click count: ", avg_distance)
+    
+    return 'complete'
+
+# -----------------------------
+#  Control drive to leg target
+# -----------------------------
+
+def drive_leg(heading, distance):
     
     global drive_state
     drive_state = 'target'
     
-    heading = target['head']
-    distance_cm = target['dist']
     leg_state = ''
         
-    # Convert distance in cm to distance in clicks
-    # From here onward distances will be in clicks
-    # ============================================
-    distance = int((distance_cm * 10) / calc_click_distance())
-    
     while leg_state != 'complete':
 
         # Turn to required heading
         print("---> Current heading: ", avg_heading)
         turn_to_heading(heading)
+        print("---> Heading after turn: ", avg_heading)
 
         # Drive to target
         print ('---> Drive to target')
-        drive_dist = target_drive(distance)
-                
-        if drive_dist != distance:
-            
-            # If distance is greater then target was not reached
-            # because an obstacle was encountered.
-            # A detour action is required.
+        drive_result = target_drive(distance)
+        
+        # Wait for data send to catch up
+        utime.sleep(1)
                         
-            print( "---> Target direction obstructed, detour required")
+        if drive_result == 'obstacle':
+            
+            # An obstacle was encountered on current target heading
+            # A detour action is required.
             drive_state = 'detour'
             
-            # The remaining distance is required to calculate
+            print( "---> Target direction obstructed, detour required")
+            
+            #Calculate distance driven to target
+            dist_completed = (
+                front_left_motor_count +
+                front_right_motor_count +
+                rear_left_motor_count +
+                rear_right_motor_count) / 4
+            
+            # Calculate remaining distance. It is required to calculate
             # target heading and distance from detour point
-            remaining_dist = distance - drive_dist
+            remaining_dist = distance - dist_completed
+                        
+            # Execute detour and return new target heading and distance.
+            # This will be used to start a new target drive
+            new_target = make_detour(heading, remaining_dist)
             
-            # Execute detour and return heading and distance
-            # to target once obstacle has been avoided. This
-            # will be used to start a new target drive
-            new_target = detour(heading, remaining_dist)
-            
+            # New heading and distance to target from detour location
             heading = new_target['heading']
             distance = new_target['distance']
+            
             drive_state = 'target'
             
-        else:
+        elif drive_result == 'complete':
             print ('--- Target Reached ---')
             leg_state = 'complete'
-
+        
     return leg_state
-
-
 
 def main():
     
@@ -1217,7 +1242,7 @@ def main():
 
     print ('--- Main START ---')
 
-    utime.sleep(4)
+    utime.sleep(3)
 
     global bot_state
     bot_state = ''
@@ -1229,8 +1254,8 @@ def main():
             
     # Ready for connection from command module
     bot_state = 'Command'
-    print("Ready for command connection")
-    print("Waiting for connection confirmation command")
+    print("--- Ready for command connection")
+    print(">>> Waiting for connection confirmation command")
 
     while con_cmd == False:
         # Indicate by slow/fast blinking LED - 
@@ -1245,12 +1270,12 @@ def main():
             if command_cmd['type'] == 'CON':
                 con_cmd = True
         else:    
-            utime.sleep(2)
+            utime.sleep(1)
 
     # Ready to receive route data
     bot_state = 'Connected'
-    print("Command module connected")  
-    print("Waiting for route data")
+    print("--- Command module connected")  
+    print(">>> Waiting for route data")
 
     while nav_cmd == False:
         # Indicate by slow/fast blinking LED
@@ -1267,16 +1292,16 @@ def main():
                 print("Route Data Received: ", route_cmd)
         
         else:    
-            utime.sleep(2)
+            utime.sleep(1)
     
     # Ready to receive go command
     bot_state = 'Ready'
-    print("Route data received")  
-    print("Ready for GO command")
+    print("--- Route data received")  
+    print(">>> Ready for GO command")
 
     while go_cmd == False:
         # Indicate by slow/fast blinking LED
-        blink(3, 0.3, 0.2)
+        blink(3, 0.3, 0.3)
         
         command_cmd = receive_data()
 
@@ -1287,12 +1312,12 @@ def main():
                 go_cmd = True
                         
         else:    
-            utime.sleep(2)
+            utime.sleep(1)
     
     # Start executing route
     bot_state = 'go'
-    print("Go command received")  
-    print("Drive route")
+    print("--- Go command received")  
+    print(">>> Drive route")
     
     # Start reading compass to monitor heading 
     start_heading_monitor()
@@ -1306,25 +1331,46 @@ def main():
     # Configure timer interrupt event for sonic sensor
     timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
     print('---> Sonic timer started')
-    utime.sleep(2)
-
+    
     # Configure timer interrupt event for progress update
+    # Period is in milliseconds; 1 second = 1000
+    # timer_2.init(period=500, mode=Timer.PERIODIC, callback=send_progress)
+    # But freq=1 just seems to work better. Why? Need to find this out!
     timer_2.init(freq=1, mode=Timer.PERIODIC, callback=send_progress)
     print('---> Progress timer started')
-    utime.sleep(2)
+    
+    # With given wheel diameter calculate wheel circumfrance
+    wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2) # mm
+    print(">>> Wheel circumference: ", wheel_circumference, " mm")
+    
+    # Divide circumference by number of slots to get distance per slot
+    click_distance = int(wheel_circumference / encoder_slots) # mm
+    print(">>> Click distance = ", click_distance, " mm")
     
     # Start navigating drive
     for leg in route_cmd:
 
-        print('---> Leg: ', leg)
+        print('---> Leg detail: ', leg)
         
         global leg_num #, leg_heading, leg_distance
         leg_num = leg['leg']
-        # leg_heading = leg['head'] From leg Command knows this as it knows the route
-        # leg_distance = leg['dist'] From leg Command knows this as it knows the route
+                
+        heading = leg['head']
+        distance_cm = leg['dist']
         
+        print("--> Leg number: ", leg_num, " Heading: ", heading, " Distance: ", distance_cm)
+        
+        # Convert distance in cm to distance in clicks
+        distance = int((distance_cm * 10) / click_distance) # clicks
+        print("--- Leg distance = ", distance, " clicks")
+        
+        # +++++++++++++++++++++++++++++++++++++++++
+        #  From here onward distances is in clicks
+        # +++++++++++++++++++++++++++++++++++++++++
+    
         # Drive to leg target
-        leg_state = drive_leg(leg)
+        leg_state = drive_leg(heading, distance)
+        utime.sleep(0.5)
 
         # Process leg drive result
         if leg_state == "complete":
@@ -1350,11 +1396,7 @@ def navbotMain():
         print('--- Start Main Loop ---')
         main()
         print('--- Main Loop Complete ---')
-        timer_1.deinit()
-        timer_2.deinit()
-        stop_heading_monitor()
-        sys.exit()
-
+        
     except Exception as ex:
         # Exception, stop motors
         stop()
@@ -1372,7 +1414,7 @@ def navbotMain():
         print('An error has occurred.')
 
     finally:
-        # Cleanup, stop motors
+        # Cleanup
         stop()
         timer_1.deinit()
         timer_2.deinit()
@@ -1387,18 +1429,14 @@ def direct():
             print('--- Start Main Loop ---')
             main()
             print('--- Main Loop Complete ----')
-            timer_1.deinit()
-            timer_2.deinit()
-            stop_heading_monitor()
-            sys.exit()
-
+        
         except:
             # Exception, stop motors
+            stop()
             print('An error has occurred.')
 
         finally:
-            # Cleanup, stop motors
-            stop()
+            # Cleanup
             timer_1.deinit()
             timer_2.deinit()
             print('--- Timers 1 & 2 stopped ---')
