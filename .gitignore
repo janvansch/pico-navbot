@@ -6,6 +6,7 @@
 .env.production.local
 .vscode*
 .gitignore
+/.bak
 
 # dependencies
 /node_modules
