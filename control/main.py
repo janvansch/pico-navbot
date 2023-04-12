@@ -32,20 +32,22 @@ led = Pin(25, Pin.OUT)
 # -----------------------------------
 #  UART channel for Bluetooth module
 # -----------------------------------
-# Setup UART channel 0 (TX = GP0 & RX = GP1), with baud rate of 9600
+
 # Connect GP0 (UART0 Tx) to Rx of HC-05/06 Bluetooth module (brown)
 # Connect GP1 (UART0 Rx) to Tx of HC-05/06 Bluetooth module (orange)
-# Module powerred by 5v bus, but RX and TX powerred by internal 3.3v regulator
+# Module powered by 5v bus, but RX and TX powered by internal 3.3v regulator
 
-uart = UART(0, baudrate=9600, parity=None, stop=1, bits=8, tx=Pin(0), rx=Pin(1))
-# init() method was dropped in the rp2 port.
+# Setup UART channel 0 (TX = GP0 & RX = GP1), with baud rate of 9600
 # uart = UART(uart_num, 9600, parity=None, stop=1, bits=8, rx=rxPin, tx=txPin)
+uart = UART(0, baudrate=9600, parity=None, stop=1, bits=8, tx=Pin(0), rx=Pin(1))
+
+# The init() method was dropped in the rp2 port.
 # init is performed at instantiation
 
 # --------------------------------
 #  I2C channel for Compass module
 # --------------------------------
-# Powerred by 3.3v bus
+# Powered by 3.3v bus
 # Does not require Logic Level Converter to convert sda to 3.3v
 # sda = green
 # scl = grey
@@ -56,7 +58,7 @@ i2c = I2C(1, sda=Pin(2), scl=Pin(3), freq=400000)
 # ------------------------
 #  Sonic sensor interface
 # ------------------------
-# Powerred by 5v bus
+# Powered by 5v bus
 # Requires Logic Level Converter to convert echo signal to 3.3v (1 channel)
 
 trigger = Pin(4, Pin.OUT) # brown
@@ -65,7 +67,7 @@ echo = Pin(5, Pin.IN) # white
 # ---------------------------------
 #  Motor rotation sensor interface
 # ---------------------------------
-# Powerred by 5v bus of L298N
+# Powered by 5v bus of L298N
 # Requires Logic Level Converter to convert signal to 3.3v (4 channels)
 
 rear_left_motor = Pin(8, Pin.IN) # white
@@ -76,7 +78,7 @@ front_right_motor = Pin(15, Pin.IN) # dark purple
 # ---------------------
 #  IR sensor interface
 # ---------------------
-# Powerred by 5v bus
+# Powered by 5v bus
 # Requires Logic Level Converter to convert signal to 3.3v (6 channels)
 
 ir_mid_left = Pin(6, Pin.IN) # purple
@@ -87,9 +89,9 @@ ir_front_centre = Pin(12, Pin.IN) # yellow
 ir_front_right = Pin(13, Pin.IN) # green
 
 # -----------------------------------
-#  Motor Controler (L298N) interface
+#  Motor Controller (L298N) interface
 # -----------------------------------
-# Remember to connect L298N GND to Pico GND because it is powerred by a seperate battery
+# Remember to connect L298N GND to Pico GND because it is powered by a separate battery
 # Pico output signal (3.3v), no Logic Level Converter required
 
 # Speed control - PWM
@@ -130,7 +132,6 @@ timer_2 = Timer()
 # Use the "global" keyword to read and write a global variable inside a function.
 
 second_thread = True
-obstacle = False
 front_obstacle = False
 rear_obstacle = False
 left_obstacle = False
@@ -254,9 +255,22 @@ def stop_heading_monitor():
     second_thread = False
     _thread.exit()
     
-def reset_obstacle():
-    global obstacle
-    obstacle = False
+# Reset obstacle flags
+def reset_front_obstacle():
+    global front_obstacle
+    front_obstacle = False
+
+def reset_rear_obstacle():
+    global rear_obstacle
+    rear_obstacle = False
+
+def reset_left_obstacle():
+    global left_obstacle
+    left_obstacle = False
+
+def reset_right_obstacle():
+    global right_obstacle
+    right_obstacle = False
     
 # Reset travel distance counters
 def reset_counters():
@@ -302,10 +316,6 @@ def rear_right_motor_counter(pin):
 
 def set_front_obstacle(pin):
 
-    # ir_front_left = Pin(11, Pin.IN) # orange
-    # ir_front_centre = Pin(12, Pin.IN) # yellow
-    # ir_front_right = Pin(13, Pin.IN) # green
-
     global front_obstacle
     
     if front_obstacle == False:
@@ -339,21 +349,6 @@ def clear_right_obstacle(pin):
     
         right_obstacle = False
         print("---> IRQ source: ", pin)
-
-# def set_obstacle(irq_pin):
-
-#     # ir_front_left = Pin(11, Pin.IN) # orange
-#     # ir_front_centre = Pin(12, Pin.IN) # yellow
-#     # ir_front_right = Pin(13, Pin.IN) # green
-
-#     global obstacle, sensor #, irq_state
-#     # irq_state = disable_irq()
-#     # irq_pin.irq().disable()
-#     irq_pin.irq().deinit()
-    
-#     obstacle = True
-#     sensor = irq_pin
-#     print("---> IRQ source: ", irq_pin)
 
 # ========================
 #  Second Thread Function
@@ -444,7 +439,7 @@ def send_data(tx_data):
     # 7 or 8 bit characters use one byte
     # 9 bit characters use two bytes
     # buf must have an even number of bytes
-    # Returns the number of bytes writen
+    # Returns the number of bytes written
     print("Bytes sent", bytes_sent)
 
 def receive_data():
@@ -467,7 +462,7 @@ def send_progress(timer_2):
     progress = {}
     progress = {
         'leg_n' : leg_num,
-        #'leg_h' : leg_heading, # why? As Command knows the route all it is the leg to know the headingneeds
+        #'leg_h' : leg_heading, # why? As Command knows the route all it needs is the leg to know the heading
         #'leg_d' : leg_distance, # why?
         'state' : drive_state,
         't_head' : avg_heading,
@@ -490,10 +485,10 @@ def get_sonic_distance():
     
     duration = 0
     distance = 0
-    signaloff = 0
-    signalon = 0
+    signal_off = 0
+    signal_on = 0
     
-    #Pause for two milliseconds to ensure 
+    # Pause for two milliseconds to ensure 
     # the previous setting has completed
     utime.sleep_us(2)
     
@@ -507,18 +502,18 @@ def get_sonic_distance():
     # Create a while loop to check whether the  
     # echo pin is 0 and record the time
     while echo.value() == 0:
-        signaloff = utime.ticks_us()
+        signal_off = utime.ticks_us()
 
     # Create a while loop to check Whether the echo 
     # pin value is 1 and then record the time
     while echo.value() == 1:
-        signalon = utime.ticks_us()
+        signal_on = utime.ticks_us()
 
     utime.sleep(0.2)
-    #Calculate the time difference between sending and receiving
-    duration = signalon - signaloff
+    # Calculate the time difference between sending and receiving
+    duration = signal_on - signal_off
 
-    #Sonic travel time x speed of sound
+    # Sonic travel time x speed of sound
     # (343.2 m/s , Which is 0.0343 cm per microsecond),
     # and the back-and-forth distance is divided by 2
     distance = (duration * 0.0343) / 2
@@ -535,7 +530,7 @@ def sonic_sense(timer_1):
     # If free distance is limited stop
     if sonic_distance < 5:
         stop()
-        #suspend timer
+        # suspend timer
         timer_1.deinit()
         led.on()
         print('obstacle within 5cm')
@@ -547,7 +542,7 @@ def sonic_sense(timer_1):
             led.off()
             utime.sleep(0.5)
             distance = get_sonic_distance()
-        #start timer again
+        # start timer again
         timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
 # -------------------------
@@ -627,7 +622,7 @@ def calc_duty(level):
     # The duty cycle for level 10 would be:
     #     (21675 x 10 / 10) + 21675 = 43350 which is 9v x 43350 / 65025 = 6v 
     # Need to confirm this with testing.
-    # Lith nominal 3.6v and 3.7v and 4.2v after charge
+    # Lithium nominal 3.6v and 3.7v and 4.2v after charge
     #
     motor_max_v = 6
     motor_min_v = 3
@@ -787,44 +782,6 @@ def best_deviation_angle():
 
     return best_angle
 
-# def turn_to_heading_old(req_heading):
-    
-#     print ("--- Start turn to heading ---")
-        
-#     print ("---> Compass heading: ", avg_heading)
-    
-#     if avg_heading > req_heading:
-        
-#         if req_heading < avg_heading - 180:
-#             turn_right()
-#             while avg_heading != req_heading:
-#                 print(">>> right", avg_heading)
-#             stop()
-            
-#         else:
-#             turn_left()
-#             while avg_heading != req_heading:
-#                 print("<<< left", avg_heading)
-#             stop()
-            
-#     elif avg_heading < req_heading:
-        
-#         if req_heading > avg_heading + 180:
-#             turn_left()
-#             while avg_heading != req_heading:
-#                 print("<<< left", avg_heading)
-#             stop()
-            
-#         else:
-#             turn_right()
-#             while avg_heading != req_heading:
-#                 print(">>> right", avg_heading)
-#             stop()
-            
-#     else:
-        
-#         print("--- On course, no turn required")
-        
 def turn_to_heading(target_heading):
     #
     # Course correction at waypoint or at detour point.
@@ -874,9 +831,6 @@ def turn_to_heading(target_heading):
         
         curr_heading = avg_heading
     
-    #stop()
-    #gc.collect()
-        
     #
     # Small step turn when close to required heading.
     #    
@@ -925,16 +879,16 @@ def calc_target_pos(deviation_angle, detour_distance, target_distance, obstacle_
     
     # a) Calculate target position (heading & distance) from detour position.
     #    This will be the new dead reconning point.
-    # b) If the detour is successfull in avoided the obstacle the NavBot will set
+    # b) If the detour is successful in avoided the obstacle the NavBot will set
     #    target mode and drive to target as per the target data from this point.
     # c) If not, a new detour will start from this point and the deviation
     #    from target heading will be calculated from this point.
     
-    # For the detour angle and travel distance how far did the navbot deviate
+    # For the detour angle and travel distance how far did the NavBot deviate
     # from the original target heading? This is the side opposite the detour angle 
     # of the detour triangle. This triangle is formed by the dead reconning point's
     # distance to target, the detour angle, the detour travel distance and the 
-    # distance of the detour position from the target. The oposite side will be
+    # distance of the detour position from the target. The opposite side will be
     # the new distance to target. The law of cosines will be used to calculate this
     # new distance and heading. The new heading will be used to calculate the turn
     # angle the NavBot must execute to point towards the target.
@@ -954,7 +908,7 @@ def calc_target_pos(deviation_angle, detour_distance, target_distance, obstacle_
     #                  and the detour deviation angle
     #
         
-    # The postion of the target from the position reached after a detour drive
+    # The position of the target from the position reached after a detour drive
     current_target_position = {}
 
     if deviation_angle > 180:
@@ -1137,43 +1091,36 @@ def verify_heading(heading, speed, clicks_remaining):
 def detour_drive(side):
 
     # If the bot made a turn to the right the target is on the left.
-    # Drive untill the left side is not blocked.
+    # Drive until the left side is not blocked.
     # If the bot made a turn to the left the target is on the right.
-    # Drive untill the right side is not blocked.
+    # Drive until the right side is not blocked.
     
     target_blocked = True
         
-    # Reset distance counters
-    reset_counters()
-    
-    # Reset obstacle flag after turning away from obstacle
-    reset_obstacle()
-
-    # Re-enable obstacle sensors for detour drive
-    # enable_irq(irq_state)
-    # sensor.irq().enable()
-    front_obstacle = False
-    rear_obstacle = False
-    if side == "left":
-        left_obstacle = True
-    else:
-        left_obstacle = False
-    if side == "right":
-        right_obstacle = True
-    else:
-        right_obstacle = False
+    # front_obstacle = False
+    # rear_obstacle = False
+    # if side == "left":
+    #     left_obstacle = True
+    # else:
+    #     left_obstacle = False
+    # if side == "right":
+    #     right_obstacle = True
+    # else:
+    #     right_obstacle = False
     
     forward('slow')
    
-    print(obstacle)
     print("--- Detour Drive Started ---")
     
-    while target_blocked and not obstacle:
+    while target_blocked and not front_obstacle:
             
         # Read side sensor state
         # Sensor output:
         #   0 = low, obstacle
         #   1 = high, no obstacle (5v on sensor line)
+
+        # === Potential problem:
+        # === The sensor may be clear but how big is the gap?
         
         if side == "left" and ir_mid_left.value() == 1:
             target_blocked = False # target clear, resume drive to target
@@ -1183,19 +1130,18 @@ def detour_drive(side):
         
     stop()
     
-    if obstacle:
+    if front_obstacle:
         # IRQ - obstacle flag set, stop detour drive
-        # Another detour required to avoid an obstacle in detour path
-        print("--- Obstacle encountered, suspend current detour")
-        reset_obstacle()
+        # Another detour required to avoid an obstacle in the detour path
+        print("--- Obstacle encountered in detour path, suspend detour")
         
         return 'obstacle'
 
     return 'clear'
 
-# -----------------------------------------
-#  Control detour and calculate new target
-# -----------------------------------------
+# --------------------------------------------------------------
+#  Control detour and return new heading and distance to target
+# --------------------------------------------------------------
 
 def make_detour(target_heading, target_distance):
     
@@ -1206,6 +1152,8 @@ def make_detour(target_heading, target_distance):
     global drive_state
     
     while target_blocked:
+
+        print(":--> Start detour number: ", detour_count)
                
         # Determine direction with best free distance
         print("Determine best detour heading")
@@ -1216,6 +1164,16 @@ def make_detour(target_heading, target_distance):
         # the Cosine rule
         
         print(":--> Deviation angle: ", deviation_angle)
+
+        # Determine obstacle side
+        if deviation_angle > 0:
+            # turning right, target would then be on the left
+            target_side = "left"
+        else:
+            # turning left, target would then be on the right 
+            target_side = "right"
+        
+        print( ":--> Target side: ", target_side)
                 
         # Determine detour heading, current heading + detour angle
         # Use compass to determine current heading
@@ -1223,25 +1181,23 @@ def make_detour(target_heading, target_distance):
         
         print(":--> Best detour heading: ", detour_heading)
         
+        # Execute turn to the heading that will avoid the obstacle
         turn_to_heading(detour_heading)
-        
-        print(":--> Turned to detour heading")
-                
-        # Determine obstacle side
-        if deviation_angle > 0:
-            # turning right, target would be to the left
-            target_side = "left"
-        else:
-            # turning left, target would be to the right 
-            target_side = "right"
-        
-        print( ":--> Target side: ", target_side)
-        
+
+        print(":--> Turned to detour ", detour_count, " heading")
+
         # Reset obstacle flag after turning away from obstacle
-        reset_obstacle()
+        reset_front_obstacle()
         
-        # Drive detour heading
+        # Reset distance counters in order to determine detour drive distance
+        reset_counters()
+        
+        print(":--> Distance counters reset for detour: ", detour_count)
+        
+        # Execute detour drive in direction of detour heading
         detour_result = detour_drive(target_side)
+
+        print(":--> Detour ", detour_count, "result :", detour_result)
         
         # Calculate average clicks recorded during detour drive
         avg_detour_distance = (
@@ -1284,10 +1240,7 @@ def make_detour(target_heading, target_distance):
             target_blocked = True
             detour_count += 1
             drive_state = "detour" + str(detour_count)
-            
-            # Reset distance counters
-            reset_counters()
-                    
+                
         else:
             print ('--- ERROR - STOP ---')
             sys.exit()
@@ -1345,9 +1298,8 @@ def target_drive(target_heading, target_clicks):
     
     if obstacle:
                 
-        # A detour from original couse is required to avoid an obstacle
+        # A detour from original course is required to avoid an obstacle
         print("--- Obstacle encountered, target drive suspended")
-        reset_obstacle()
         return 'obstacle'
     
     print(">>> Average click count: ", avg_clicks)
@@ -1427,7 +1379,7 @@ def drive_leg(target_heading, target_clicks):
 #  Main Execution Control 
 # ========================
     
-    # 1. When Navbot starts it waits for connection message
+    # 1. When NavBot starts it waits for connection message
     # from the Command module. After the Command module
     # connects it will send this message to the Control
     # module running on the NavBot.
@@ -1442,7 +1394,7 @@ def drive_leg(target_heading, target_clicks):
     # start executing the routing instructions received 
     # driving the NavBot towards the target.
     # 
-    # 4. During the drive the Navbot will transmit progress
+    # 4. During the drive the NavBot will transmit progress
     # data back to command module. The Command module
     # will display this data.
     #
@@ -1602,7 +1554,7 @@ def go_target(target_route):
     # --------------------------
     
     print('---> Calculate click distance')
-    # From wheel diameter given calculate wheel circumfrance
+    # From wheel diameter given calculate wheel circumference
     wheel_circumference = 2 * PI * (wheel_diameter_cm / 2)
     print(">>> Wheel circumference: ", wheel_circumference, " cm.") # 21.67699
     
@@ -1735,7 +1687,7 @@ rear_right_motor.irq(handler=rear_right_motor_counter, trigger=Pin.IRQ_RISING, h
 #  UART RX interrupt - not available
 # -------------------
 # uart.irq(UART.RX_ANY, priority=5, handler=process_rx, wake=machine.IDLE)
-# MicroPyton does not implement this for the Pico. Only availabe for WiPy.
+# Micropython does not implement this for the Pico. Only available for WiPy.
 
 if __name__ == "__main__":
     print("%s is being run directly" %__name__)
