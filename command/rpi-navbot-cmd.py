@@ -1,16 +1,19 @@
 # NavBot Commander
+#
 # NavBot is an auto-navigating experiment
-# This comand app will be used to -
-#   1. Input navigation info to the robot
-#   2. To monitor the progress of the robot while navigating
+#
+# This commander module is used to -
+#   1. Create and store routes for the NavBot
+#   2. Send selected route information to the bot
+#   2. To receive and display the progress of the robot while driving
 
-# Developed by Johannes van Schalkwyk
+# By Johannes van Schalkwyk
 # All rights are reserved
 
 # Written in Python 3.9.2 for execution on Raspberry Pi running Raspberry OS 64-bit 
 # Uses:
-#      Bluez for Linux
-#      tkinter
+#      Bluez for Bluetooth communication
+#      Tkinter for GUI
 
 from types import BuiltinFunctionType
 import bluetooth
@@ -55,7 +58,7 @@ def update_data():
     print("=== Thread process running ===")
 
     # Calculate click distance in cm
-    wheel_diameter = 68 # mm
+    wheel_diameter = 65 # mm
     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2)
 
     print(">>> THREAD: Wheel circumference: ", wheel_circumference, " mm")
@@ -104,7 +107,8 @@ def update_data():
             nav_data[10].set(bot_data['rr_c']) # Right Rear Counter
                         
             # Pause for GUI to update and user to read data
-            #time.sleep(1)
+            time.sleep(1)
+            
         else:
             print(">>> THREAD: No progress data")
             time.sleep(0.2)
@@ -156,8 +160,6 @@ def bt_connect():
         #bot_sock.send(msg_body + "\r\n")
         print("JSON Message: ", msg_body)
         sock.send(msg_body)
-    
-    
 
 # -----------------------------
 #  Read & update progress data
@@ -171,7 +173,6 @@ def read_nav_data():
     nav_data = json.loads(bt_data)
     
     return nav_data
-
 
 # ===================
 #  Control Functions
@@ -215,7 +216,7 @@ def send_route_selected(pop_win, listbox):
     sock.send(msg_body)
 
     # Update display with route description
-    send_state.set('Route: ' + str(route_idx + 1) )
+    send_state.set('Route: ' + str(int(route_idx) + 1) )
     
     # Need to remember this for when receiving 
     # progress data from NavBot Control
@@ -310,7 +311,6 @@ def send_stop():
     # # Send json data to NavBot via Bluetooth
     # sock.send(msg_body)
 
-
 # ====================
 #  Routes load & save
 # ====================
@@ -389,7 +389,6 @@ def save_routes(routes):
     
     return result
 
-
 # ===============================
 #  Routes list Maintenance
 # =============================== 
@@ -467,7 +466,6 @@ def delete_route():
 
     # Update legs display
     display_legs(0) # original selected route deleted
-
 
 # ===============================
 #  Routes legs Maintenance
@@ -559,7 +557,6 @@ def delete_leg():
         
         # Update legs display
         display_route_legs('e') # original selected route deleted
-
 
 # =======================
 #  Create GUI Components
@@ -1215,7 +1212,7 @@ def create_main_window():
     root.attributes('-alpha', transparency)
 
     # window stacking - on top
-    root.attributes('-topmost', 1)
+    # root.attributes('-topmost', 1)
     
     # --------------------------
     #  Configure window content
@@ -1315,12 +1312,11 @@ def create_main_window():
     # ----------------
 
     root.mainloop()
-
     
 if __name__ == "__main__":
     
     #load_routes()
-#     if routes != []:
-#         # Start GUI display
-#         create_main_window()
+    #     if routes != []:
+    #         # Start GUI display
+    #         create_main_window()
     create_main_window()
