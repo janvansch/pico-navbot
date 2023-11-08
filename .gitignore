@@ -1,12 +1,24 @@
+
+# blank line equals a seperator
+# line starting with # is a comment
+# ! negates patern i.e. includes it
+# a leading / matches beginning of pathname. "/*.c" matches "catfile.c" but not "dog/catfile.c"
+# foo/ will match directory foo and sub-directories but not files
+# **/foo matches file or directory "foo" anywhere
+# **/foo/bar matches file or directory "bar" anywhere when it is a directly under directory "foo"
+# /** matches everything inside. "abc/**" matches all files inside directory "abc" relative to location of .gitignore file 
+
 # misc
 .DS_Store
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
-.vscode*
+
 .gitignore
-/.bak
+.bak/
+.vscode/
+*.backup
 
 # dependencies
 /node_modules
@@ -24,3 +36,4 @@
 
 # data
 *.data
+*.json

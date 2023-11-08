@@ -437,7 +437,6 @@ def blink(num, on, off):
 
 def send_data(tx_data):
     tx_data_json = json.dumps(tx_data)
-
     bytes_sent = uart.write(tx_data_json)
 
     # write(buf) = write a buffer of bytes to bus
@@ -549,7 +548,7 @@ def sonic_sense(timer_1):
             utime.sleep(0.5)
             led.off()
             utime.sleep(0.5)
-            distance = get_sonic_distance()
+            sonic_distance = get_sonic_distance()
         # start timer again
         timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
@@ -733,71 +732,529 @@ def turn_right():
     left_forward.high()
 
 
-# ====================
-#  Navigation Control
-# ====================
+# ======================
+#  Navigation Functions
+# ======================
 
 
-def deviation_heading(turn_angle):
-    # Read current compass heading
-    current_heading = avg_heading
+# -------------------------
+#  Calc index of data item
+# -------------------------
+def scan_angle_idx(scan_angle, start, width):
+    return int((scan_angle - start) / width)
 
-    # Calculate detour compass heading
-    if (current_heading + turn_angle) > 360:
-        heading = (current_heading + turn_angle) - 360
-    elif (current_heading + turn_angle) < 0:
-        heading = 360 + (current_heading + turn_angle)
-    else:
-        heading = current_heading + turn_angle
 
-    print("Detour heading: ", heading)
+# ------------------------
+#  Find a wide enough gap
+# ------------------------
+def find_gap(scan_data, side, gap_width, scan_depth):
+    scan_count = 0
+    total_dist = 0
+    result = False
+    avg_distance = 0
+    last_scan_angle = 0
+    scan_start = 0
+    scan_end = 0
+    scan_width = 7
+    range_start = 6
 
-    return heading
+    if side == "left":
+        scan_start = 97
+        scan_end = 174 + 1
+
+    if side == "right":
+        scan_start = 6
+        scan_end = 83 + 1
+
+    for scan_angle in range(scan_start, scan_end, scan_width):
+        index = scan_angle_idx(scan_angle, range_start, scan_width)
+
+        if scan_data[index]["distance"] >= scan_depth:
+            scan_count += 1
+            total_dist = total_dist + scan_data[index]["distance"]
+
+        else:
+            scan_count = 0
+            total_dist = 0
+
+        # print( "Distance Running Count: ", total_dist)
+        if scan_count >= gap_width:
+            result = True
+            avg_distance = total_dist / scan_count
+            last_scan_angle = scan_angle
+
+            return result, avg_distance, last_scan_angle
+
+    print("No gap found")
+    return result, 0, 0
+
+
+# -------------------------
+#  Collect free space data
+# -------------------------
+
+
+def sonic_scan(scan_start, scan_end, scan_width):
+    scan_data = []  # List of dictionary items with scan data
+    count = 0  # Scan count
+
+    for scan_angle in range(scan_start, scan_end + 1, scan_width):
+        angle_servo(scan_angle)
+        distance = get_sonic_distance()
+        scan_data.append({"scan_point": scan_angle, "distance": distance})
+
+    return scan_data
 
 
 def best_deviation_angle():
-    # The deviation angle is the angle of change
-    # in the current heading direction
-
-    # Stop scan timer
+    #
+    # Determine the best angle to deviate from the current heading to avoid an obstacle.
+    # If no direction is found, 0 is returned.
+    # The strategy would then be to turn 90 degrees and to scan again.
+    # The turn will be made in the direction with most free space.
+    # If the four quarters are scanned and no gap was found then abort,
+    # target can't be reached.
+    #
+    # Stop periodic forward scanning timer
     timer_1.deinit()
 
-    print("---> Sonic scan timer stopped")
+    # -------
+    #  Setup
+    # -------
+    scan_start = 6  # degrees
+    scan_end = 174  # degrees
+    scan_width = 7  # degrees
+    vehicle_width = 10  # number of scan widths
+    # The number of scan that would cover a gap the vehicle would fit through
+    scan_depth = 30  # The distance that is obstacle free
+    # How far must vehicle be able to move before it can turn again
 
-    free_distance = 0
-    best_distance = 0
     best_angle = 0
+    gap_found = False
 
-    # Find best detour direction using the sonic sensor to scan
-    # turn angle with most open space in steps of 10 degrees
-    for scan_angle in range(10, 170, 10):
-        # the actual scan arc is not 180 on the servo, don't know why
+    while gap_found != True:
+        scan_data = []  # List of dictionary items with scan data
+        left_outcome = []
+        right_outcome = []
 
-        print("Scan angle: ", scan_angle)
+        # ---------------
+        #  Get scan data
+        # ---------------
+        scan_data = sonic_scan(scan_start, scan_end, scan_width)
 
-        angle_servo(scan_angle)
-        free_distance = get_sonic_distance()
-        deviation_angle = scan_angle - 90
+        # -------------------------
+        #  Analyse right scan data
+        # -------------------------
 
-        print("Deviation angle: ", deviation_angle, "Free distance: ", free_distance)
+        print("Scan Right")
 
-        if free_distance > best_distance:
-            best_angle = deviation_angle
-            best_distance = free_distance
+        right_outcome = find_gap(scan_data, "right", vehicle_width, scan_depth)
+        # result, avg_distance, last_scan_angle
 
-    print(
-        f"The best deviation angle is {best_angle} deg, with a free distance of {best_distance} cm"
-    )
+        print("Right scan result: ", right_outcome)
+
+        # ------------------------
+        #  Analyse left scan data
+        # ------------------------
+
+        print("Scan Left")
+
+        left_outcome = find_gap(scan_data, "left", vehicle_width, scan_depth)
+        # result, avg_distance, last_scan_angle
+
+        print("Left scan result: ", left_outcome)
+        if (left_outcome[0] == True) and (right_outcome[0] == True):
+            if right_outcome[1] >= left_outcome[1]:
+                best_angle = right_outcome[2]
+                gap_found = True
+
+            else:
+                best_angle = left_outcome[2]
+                gap_found = True
+
+        elif left_outcome[0] == True and right_outcome[0] == False:
+            best_angle = left_outcome[2]
+            gap_found = True
+
+        elif left_outcome[0] == False and right_outcome[0] == True:
+            best_angle = right_outcome[2]
+            gap_found = True
+
+        else:
+            # No gap found
+            best_angle = 0
+            return 0
+
+    # -----------------
+    #  Calc turn angle
+    # -----------------
+    turn_angle = 90 - (best_angle - ((vehicle_width / 2) * scan_width))
 
     # set to scan straight ahead
     angle_servo(90)
 
-    # Start scan timer again
+    # Restart periodic forward scanning timer
     timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
 
     print("--- Sonic scan timer restarted")
 
-    return best_angle
+    return turn_angle
+
+
+# ---------------------------------------
+#  Calculate new heading from turn angle
+# ---------------------------------------
+def calc_heading(turn_angle):
+    #
+    # This function calculates a new heading from
+    # the current heading and the turn angle.
+    #
+    # The current heading is taken as the average
+    # of multiple readings of the compass module.
+    current_heading = avg_heading
+
+    # Calculate heading
+    heading = current_heading + turn_angle
+
+    if heading > 360:
+        heading = heading - 360
+
+    if heading < 0:
+        heading = 360 + heading
+
+    print("New heading: ", heading)
+
+    return heading
+
+
+# def best_deviation_angle():
+#     #
+#     # This function return the best heading deviation angle to avoid an obstacle using
+#     # the sonic scanner.
+#     # The deviation angle is the scan angle with greatest free range
+#     #
+#     # Problem:
+#     # To avoid an obstacle, a gap that is wide enough for the vehicle to pass through is required.
+#     # The best deviation angle would then be in the middle of the gap
+#     # A single scan in a direction is very narrow.
+#     # Each scan is a 7 degree cone.
+#     # Therefore multiple scans in a contiguous range is required.
+#     # The contiguous scan range must cover a width equal to the vehicle's width
+#     # How many scans would provide the required range?
+#     # The width of the cone is distance dependent. E.g. @ 10cm (adjacent and hypotenuse)
+#     # the width (opposite for 7 degree angle) would be about 1.22cm.
+#     # A 70 degree scan at a distance of 15 cm would give a width of 17.2 cm
+#     # That would be 10 continuous scan points.
+#     #
+#     # Also:
+#     # What if no solution is found?
+#     # Turn 90 degrees and scan again?
+
+#     # Stop scan timer
+#     timer_1.deinit()
+
+#     print("---> Sonic scan timer stopped")
+
+#     free_distance = 0
+#     best_distance = 0
+#     best_angle = 0
+
+#     # Find best detour direction using the sonic sensor to scan
+#     # for the direction with most open space.
+#     for scan_angle in range(6, 174, 7):
+#         # The scan_angle is the position of the scanner on the scan arc
+#         # The scanner is pointing straight ahead when the scan-angle = 90 degrees
+#         # The scanner is pointing to the right when the scan-angle < 90 degrees
+#         # The scanner is pointing to the left when the scan-angle > 90 degrees
+
+#         # The actual arc of the servo is not a full 180 degrees.
+#         # What range and what scan step should be used?
+#         #
+#         # Scan step:
+#         # A scan step of 10 degrees will result in gaps in the scan arc.
+#         # At 10 degrees the scan would cover from 10 - (7 / 2) = 6.5 degrees to 10 + (7 / 2) = 13.5 degrees
+#         # At 20 degrees the scan would cover from 20 - (7 / 2) = 16.5 degrees to 20 + (7 / 2) = 23.5 degrees
+#         # A 7 degree step would not result in gaps as shown below:
+#         # At 10 degrees the scan would cover from 10 - (7 / 2) = 6.5 degrees to 10 + (7 / 2) = 13.5 degrees
+#         # At 17 degrees the scan would cover from 17 - (7 / 2) = 13.5 degrees to 17 + (7 / 2) = 20.5 degrees
+#         # At 24 degrees the scan would cover from 24 - (7 / 2) = 20.5 degrees to 17 + (7 / 2) = 27.5 degrees
+#         #
+#         # Scan range:
+#         # 90 degrees is directly ahead with a scan area from 86.5 to 93.5 degrees.
+#         # Using the 7 degree step from above the next scan point would be 83 degrees.
+#         # A scan direction of 83 degree would cover 79.5 to 86.5 degrees.
+#         # The left and right side must have an equal number of scan points.
+#         # Scan points per side would be 90 / 7 which gives a whole number of 12.
+#         # Therefore the scan start point would be 90 - (7 x 12) = 90 - 84 = 6 degrees
+#         # and the scan end point would be 90 + 84 = 174 degrees.
+#         # This would give a total scan arc of 6 - 3.5 = 2.5 and 174 + 3.5 = 177.5
+#         # Scan points 6, 13, 20, 27, 34, 41, 48, 55, 62, 69, 76, 83, 90, 97, 104, 111, 118, 125, 132, 139, 146, 153, 160, 167, 174
+#         # Front scan point: 90
+#         # Left of front:  97, 104, 111, 118, 125, 132, 139, 146, 153, 160, 167, 174
+#         # Right of front: 83,  76,  69,  62,  55,  48,  41,  34,  27,  20,  13,   6
+
+#         print("Scan angle: ", scan_angle)
+
+#         # Get free distance for the scan angle
+#         angle_servo(scan_angle)
+#         free_distance = get_sonic_distance()
+
+#         # Determine the deviation angle
+#         deviation_angle = 90 - scan_angle
+#         # The deviation angle is the angle between the center line
+#         # and the scanning direction on the scan arc.
+#         # It gives the degrees the vehicle must turn to align its center
+#         # line with the scan direction.
+#         # If positive turn right
+#         # if negative turn left
+
+#         print("Deviation angle: ", deviation_angle, "Free distance: ", free_distance)
+
+#         if free_distance > best_distance:
+#             best_angle = deviation_angle
+#             best_distance = free_distance
+
+#     print(
+#         f"The best deviation angle is {best_angle} deg, with a free distance of {best_distance} cm"
+#     )
+
+#     # set to scan straight ahead
+#     angle_servo(90)
+
+#     # Start scan timer again
+#     timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+
+#     print("--- Sonic scan timer restarted")
+
+#     return best_angle
+
+
+def calc_target_pos(
+    deviation_angle, detour_distance, remaining_distance, obstacle_side
+):
+    # a) Calculate target position (heading & distance) from current detour position.
+    #    This will be the new dead reconning point.
+    # b) If the detour is successful in avoiding the obstacle the NavBot will
+    #    set target mode and drive to the calculated target position.
+    # c) If not, a new detour will start from this point and the deviation
+    #    from target heading will be calculated from current detour position.
+
+    # Form the detour angle and detour travel distance how far did the NavBot deviate
+    # from the original target heading? This is the side opposite the detour angle
+    # of the detour triangle. This triangle is formed by the dead reconning point's
+    # distance to target, the detour angle, the detour travel distance and the
+    # distance of the detour position from the target. The opposite side will be
+    # the new distance to target. The law of cosines will be used to calculate this
+    # new distance and heading. The new heading will be used to calculate the turn
+    # angle the NavBot must execute to point towards the target.
+    #
+    #                new target heading
+    #                    and distance
+    #  target position ________________ detour position
+    #                  \              /
+    #                   \            /
+    #                    \          /
+    #  remaining distance \        /  detour heading
+    #  to target & heading \      /    & distance
+    #                       \    /
+    #                        \  /
+    #                         \/
+    #              detour point (Last dead reconning point)
+    #                  and the detour deviation angle
+    #
+
+    # This function returns the target position data from the detour position at the end of the detour drive
+    current_target_position = {}
+
+    if deviation_angle > 180:
+        # angle outside target triangle
+        deviation_angle = 360 - deviation_angle
+
+    if deviation_angle == 180:
+        # Target heading won't change. Only the target distance which would
+        # equal current target distance plus detour drive distance
+        # so the calculation of a new target heading is not required
+        current_target_distance = remaining_distance + detour_distance
+
+    else:
+        # target distance = distance to target from detour position
+        current_target_distance = math.sqrt(
+            remaining_distance**2
+            + detour_distance**2
+            - 2
+            * remaining_distance
+            * detour_distance
+            * math.cos(math.radians(deviation_angle))
+        )
+
+    print(":--> Target distance: ", current_target_distance)
+
+    # calc detour position angle
+    detour_position_angle = math.degrees(
+        math.acos(
+            (
+                current_target_distance**2
+                + detour_distance**2
+                - remaining_distance**2
+            )
+            / (2 * current_target_distance * detour_distance)
+        )
+    )
+
+    print(":--> Detour position angle: ", detour_position_angle)
+
+    # The degrees to turn, the target_turn_angle, from the current detour heading
+    # to the new target heading calculated from the current detour position -
+    # detour heading is a straight line, 180 degrees
+    target_turn_angle = 180 - detour_position_angle
+
+    # But in which direction?
+    # If obstacle is to the left it means the NavBot turned to the right
+    # to avoid the obstacle. That means the target heading is to the left
+    if obstacle_side == "left":
+        # that is counter clock wise on compass, make angle negative
+        target_turn_angle = target_turn_angle * -1
+
+    #         new_detour_heading = current_heading + detour_angle
+    #
+    #         if new_detour_heading > 360:
+    #             new_detour_heading = new_detour_heading - 360
+    #
+    #     else:
+    #         new_detour_heading = target_heading - detour_angle
+    #
+    #         if detour_heading < 0:
+    #             new_detour_heading = new_detour_heading + 360
+
+    print(":--> Target turn angle: ", target_turn_angle)
+
+    # calc target heading using current compass heading
+    current_target_heading = calc_heading(target_turn_angle)
+
+    print(":--> New target heading: ", current_target_heading)
+
+    # calc target heading without using compass heading
+    #         if detour_angle > 0:
+    #             new_target_heading_2 = detour_heading - target_turn_angle
+    #
+    #             if new_target_heading_2 < 0:
+    #                 new_target_heading_2 = new_target_heading_2 + 360
+    #         else:
+    #             target_heading_2 = detour_heading + target_turn_angle
+    #
+    #             if target_heading_2 > 360:
+    #                 target_heading_2 = target_heading_2 - 360
+
+    current_target_position["heading"] = (current_target_heading,)
+    current_target_position["distance"] = current_target_distance
+
+    return current_target_position
+
+
+# =================
+#  Drive Functions
+# =================
+
+
+def correction(side, correction):
+    # Correct small heading deviations while driving by setting different left and right
+    # motor speeds based on the degree of deviation.
+    # If deviation is to large trigger detour mode which will do a new heading calculation
+
+    left_duty_cycle = 0
+    right_duty_cycle = 0
+    speed = ""
+    turn = ""
+
+    if correction > 5:
+        # Course correction required. Stop and create dead reconning point
+        stop()
+        global obstacle
+        obstacle = True
+
+    else:
+        if correction < 3:
+            speed = "half"
+            turn = "gentle"
+
+        elif correction >= 3 or correction <= 5:
+            speed = "slow"
+            turn = "sharp"
+
+        # PWM level of speed:
+        level = speeds[speed]
+
+        if turn == "gentle":
+            # Gentle turns are done at half speed
+            if side == "left":
+                left_duty_cycle = calc_duty(level - 1)
+                right_duty_cycle = calc_duty(level)
+            if side == "right":
+                left_duty_cycle = calc_duty(level)
+                right_duty_cycle = calc_duty(level - 1)
+
+        elif turn == "sharp":
+            # Sharp turns are done at slow speed
+            if side == "left":
+                left_duty_cycle = calc_duty(level - 1)
+                right_duty_cycle = calc_duty(level + 1)
+            if side == "right":
+                left_duty_cycle = calc_duty(level + 1)
+                right_duty_cycle = calc_duty(level - 1)
+
+        left_pwm.duty_u16(left_duty_cycle)
+        right_pwm.duty_u16(right_duty_cycle)
+
+
+def verify_heading(heading, speed, clicks_remaining):
+    #
+    # This function must be called by target_drive() & detour_drive()
+    # while driving to verify heading. If there is a deviation correct
+    # heading by setting different speeds for the left motors and the
+    # right motors.
+    # As this is not considered to be a course correction this should happen
+    # smoothly as part of the drive function without stopping. But if there
+    # is a major difference then the drive should be stopped and a course
+    # correction must be made.
+
+    curr_heading = avg_heading
+    deviance = abs(heading - curr_heading)
+
+    while deviance > 1 and clicks_remaining > 10:
+        if heading < curr_heading:
+            correction("left", deviance)
+
+        elif heading > curr_heading:
+            correction("right", deviance)
+
+    set_speed(speed)
+
+
+# def calc_click_distance():
+
+#     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2) # mm
+#     distance_per_click = wheel_circumference / (encoder_slots) # mm
+#     print ("--- Click distance = ", distance_per_click, " mm")
+
+#     return distance_per_click
+
+#
+#  Convert distance (cm) into slots count
+#
+# def calc_clicks(distance_cm):
+#     #print ("--- Convert distance to clicks")
+#     distance_mm = distance_cm * 10
+#     clicks = int(distance_mm / calc_click_distance())
+#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
+#     return clicks
+
+# #
+# #  Convert clicks counted to distance travelled
+# #
+# def calc_distance(clicks):
+#     distance_mm = clicks * calc_click_distance()
+#     distance_cm = distance_mm / 10
+#     return distance_cm
 
 
 def turn_to_heading(target_heading):
@@ -888,239 +1345,13 @@ def turn_to_heading(target_heading):
     stop()
 
 
-def calc_target_pos(
-    deviation_angle, detour_distance, remaining_distance, obstacle_side
-):
-    # a) Calculate target position (heading & distance) from current detour position.
-    #    This will be the new dead reconning point.
-    # b) If the detour is successful in avoiding the obstacle the NavBot will
-    #    set target mode and drive to the calculated target position.
-    # c) If not, a new detour will start from this point and the deviation
-    #    from target heading will be calculated from current detour position.
-
-    # Form the detour angle and detour travel distance how far did the NavBot deviate
-    # from the original target heading? This is the side opposite the detour angle
-    # of the detour triangle. This triangle is formed by the dead reconning point's
-    # distance to target, the detour angle, the detour travel distance and the
-    # distance of the detour position from the target. The opposite side will be
-    # the new distance to target. The law of cosines will be used to calculate this
-    # new distance and heading. The new heading will be used to calculate the turn
-    # angle the NavBot must execute to point towards the target.
-    #
-    #                new target heading
-    #                    and distance
-    #  target position ________________ detour position
-    #                  \              /
-    #                   \            /
-    #                    \          /
-    #  remaining distance \        /  detour heading
-    #  to target & heading \      /    & distance
-    #                       \    /
-    #                        \  /
-    #                         \/
-    #              detour point (Last dead reconning point)
-    #                  and the detour deviation angle
-    #
-
-    # The position of the target from the detour position at the end of the detour drive
-    current_target_position = {}
-
-    if deviation_angle > 180:
-        # angle outside target triangle
-        deviation_angle = 360 - deviation_angle
-
-    if deviation_angle == 180:
-        # Target heading won't change. Only the target distance which would
-        # equal current target distance plus detour drive distance
-        # so the calculation of a new target heading is not required
-        current_target_distance = remaining_distance + detour_distance
-
-    else:
-        # target distance = distance to target from detour position
-        current_target_distance = math.sqrt(
-            remaining_distance**2
-            + detour_distance**2
-            - 2
-            * remaining_distance
-            * detour_distance
-            * math.cos(math.radians(deviation_angle))
-        )
-
-    print(":--> Target distance: ", current_target_distance)
-
-    # calc detour position angle
-    detour_position_angle = math.degrees(
-        math.acos(
-            (
-                current_target_distance**2
-                + detour_distance**2
-                - remaining_distance**2
-            )
-            / (2 * current_target_distance * detour_distance)
-        )
-    )
-
-    print(":--> Detour position angle: ", detour_position_angle)
-
-    # turn_angle = the degrees to turn from the current detour heading to
-    # new target heading as calculated at the current detour position -
-    # detour heading is a straight line, 180 degrees
-    target_turn_angle = 180 - detour_position_angle
-
-    # But in which direction?
-    # If obstacle is to the left it means the NavBot turned to the right
-    # to avoid the obstacle. That means the target heading is to the left
-    if obstacle_side == "left":
-        # that is counter clock wise on compass, make angle negative
-        target_turn_angle = target_turn_angle * -1
-
-    #         new_detour_heading = current_heading + detour_angle
-    #
-    #         if new_detour_heading > 360:
-    #             new_detour_heading = new_detour_heading - 360
-    #
-    #     else:
-    #         new_detour_heading = target_heading - detour_angle
-    #
-    #         if detour_heading < 0:
-    #             new_detour_heading = new_detour_heading + 360
-
-    print(":--> Target turn angle: ", target_turn_angle)
-
-    # calc target heading using current compass heading
-    current_target_heading = deviation_heading(target_turn_angle)
-
-    print(":--> New target heading: ", current_target_heading)
-
-    # calc target heading without using compass heading
-    #         if detour_angle > 0:
-    #             new_target_heading_2 = detour_heading - target_turn_angle
-    #
-    #             if new_target_heading_2 < 0:
-    #                 new_target_heading_2 = new_target_heading_2 + 360
-    #         else:
-    #             target_heading_2 = detour_heading + target_turn_angle
-    #
-    #             if target_heading_2 > 360:
-    #                 target_heading_2 = target_heading_2 - 360
-
-    current_target_position["heading"] = (current_target_heading,)
-    current_target_position["distance"] = current_target_distance
-
-    return current_target_position
-
-
-# ===============
-#  Drive Control
-# ===============
-
-
-def correction(side, correction):
-    # Correct small heading deviations while driving by setting different left and right
-    # motor speeds based on the degree of deviation.
-    # If deviation is to large trigger detour mode which will do a new heading calculation
-
-    left_duty_cycle = 0
-    right_duty_cycle = 0
-    speed = ""
-    turn = ""
-
-    if correction > 5:
-        # Course correction required. Stop and create dead reconning point
-        stop()
-        global obstacle
-        obstacle = True
-
-    else:
-        if correction < 3:
-            speed = "half"
-            turn = "gentle"
-
-        elif correction >= 3 or correction <= 5:
-            speed = "slow"
-            turn = "sharp"
-
-        # PWM level of speed:
-        level = speeds[speed]
-
-        if turn == "gentle":
-            # Gentle turns are done at half speed
-            if side == "left":
-                left_duty_cycle = calc_duty(level - 1)
-                right_duty_cycle = calc_duty(level)
-            if side == "right":
-                left_duty_cycle = calc_duty(level)
-                right_duty_cycle = calc_duty(level - 1)
-
-        elif turn == "sharp":
-            # Sharp turns are done at slow speed
-            if side == "left":
-                left_duty_cycle = calc_duty(level - 1)
-                right_duty_cycle = calc_duty(level + 1)
-            if side == "right":
-                left_duty_cycle = calc_duty(level + 1)
-                right_duty_cycle = calc_duty(level - 1)
-
-        left_pwm.duty_u16(left_duty_cycle)
-        right_pwm.duty_u16(right_duty_cycle)
-
-
-def verify_heading(heading, speed, clicks_remaining):
-    # This function must be called by target_drive() & detour_drive()
-    # while driving to verify heading. If there is a deviation correct
-    # heading by setting different speeds for the left motors and the
-    # right motors.
-    # As this is not considered to be a course correction this should happen
-    # smoothly as part of the drive function without stopping. But if there
-    # is a major difference then the drive should be stopped and a course
-    # correction must be made.
-
-    curr_heading = avg_heading
-    deviance = abs(heading - curr_heading)
-
-    while deviance > 1 and clicks_remaining > 10:
-        if heading < curr_heading:
-            correction("left", deviance)
-
-        elif heading > curr_heading:
-            correction("right", deviance)
-
-    set_speed(speed)
-
-
-# def calc_click_distance():
-
-#     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2) # mm
-#     distance_per_click = wheel_circumference / (encoder_slots) # mm
-#     print ("--- Click distance = ", distance_per_click, " mm")
-
-#     return distance_per_click
-
-#
-#  Convert distance (cm) into slots count
-#
-# def calc_clicks(distance_cm):
-#     #print ("--- Convert distance to clicks")
-#     distance_mm = distance_cm * 10
-#     clicks = int(distance_mm / calc_click_distance())
-#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
-#     return clicks
-
-# #
-# #  Convert clicks counted to distance travelled
-# #
-# def calc_distance(clicks):
-#     distance_mm = clicks * calc_click_distance()
-#     distance_cm = distance_mm / 10
-#     return distance_cm
-
-
 # -------------------------------------------
 #  Drive detour heading to avoid an Obstacle
 # -------------------------------------------
 
 
 def detour_drive(side):
+    #
     # If the bot made a turn to the right the target is on the left.
     # Drive until the left side is not blocked.
     # If the bot made a turn to the left the target is on the right.
@@ -1199,17 +1430,20 @@ def make_detour(target_heading, target_distance):
         if deviation_angle > 0:
             # turning right, target would then be on the left
             target_side = "left"
-        else:
+        elif deviation_angle < 0:
             # turning left, target would then be on the right
             target_side = "right"
+        else:
+            print("Target side error")
+            target_side = "err"
 
         print(":--> Target side: ", target_side)
 
         # Determine detour heading, current heading + detour angle
         # Use compass to determine current heading
-        detour_heading = deviation_heading(deviation_angle)
+        detour_heading = calc_heading(deviation_angle)
 
-        print(":--> Best detour heading: ", detour_heading)
+        print(":--> Detour heading: ", detour_heading)
 
         # Execute turn to the heading that will avoid the obstacle
         turn_to_heading(detour_heading)
@@ -1354,9 +1588,11 @@ def drive_leg(target_heading, target_clicks):
     leg_state = ""
 
     while leg_state != "complete":
-        # Turn to required heading
         print("---> Current heading: ", avg_heading)
+
+        # Turn to required heading
         turn_to_heading(target_heading)
+
         print("---> Heading after turn: ", avg_heading)
 
         # Drive to target
