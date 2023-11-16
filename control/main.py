@@ -92,7 +92,8 @@ ir_front_right = Pin(13, Pin.IN)  # green
 # -----------------------------------
 #  Motor Controller (L298N) interface
 # -----------------------------------
-# Remember to connect L298N GND to Pico GND because it is powered by a separate battery
+# Remember to connect L298N GND to Pico GND because it is
+# powered by a separate battery but signal wires are shared
 # Pico output signal (3.3v), no Logic Level Converter required
 
 # Speed control - PWM
@@ -102,10 +103,10 @@ right_pwm = PWM(Pin(17))  # L298N ENB brown right
 right_pwm.freq(50)
 
 # Forward & reverse control
-right_reverse = Pin(18, Pin.OUT)  # L298N IN4 red right reverse
-right_forward = Pin(19, Pin.OUT)  # L298N IN3 orange right forward
-left_forward = Pin(20, Pin.OUT)  # L298N IN2 yellow left forward
-left_reverse = Pin(21, Pin.OUT)  # L298N IN1 green left reverse
+right_forward = Pin(18, Pin.OUT)  # L298N IN4 red right forward
+right_reverse = Pin(19, Pin.OUT)  # L298N IN3 orange right reverse
+left_reverse = Pin(20, Pin.OUT)  # L298N IN2 yellow left reverse
+left_forward = Pin(21, Pin.OUT)  # L298N IN1 green left forward
 
 # -----------------------
 #  Servo interface - PWM
@@ -132,7 +133,7 @@ timer_2 = Timer()
 # Variables declared inside a function are local by default.
 # Use the "global" keyword to read and write a global variable inside a function.
 
-second_thread = True
+second_thread = False
 front_obstacle = False
 rear_obstacle = False
 left_obstacle = False
@@ -141,7 +142,7 @@ front_left_motor_count = 0
 front_right_motor_count = 0
 rear_left_motor_count = 0
 rear_right_motor_count = 0
-avg_heading = 0
+
 leg_num = 0
 sonic_distance = 0
 wheel_diameter_cm = 6.5  # cm
@@ -178,7 +179,7 @@ Y_AXIS_H = 0x07
 DECLINATION = -0.4459
 # -25degrees 33minutes 25.55 = -0.4459 radians
 
-# Define pi value
+# Set pi value
 PI = 3.14159265359
 
 # HMC5883L magnetometer device address
@@ -196,61 +197,69 @@ i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_B, b"\xa0")
 # Write to mode Register for selecting mode
 i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_MODE, b"0")
 
+# ========================
+#  Second Thread Function
+# ========================
+# def monitor_heading():
 
-# -----------------------------------
-#  Initialise HMC5883L magnetometer:
-# -----------------------------------
-def magnetometer_init():
-    # Write to Configuration Register A
-    i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_A, b"\x70")
+#     global avg_heading
 
-    # Write to Configuration Register B for gain
-    i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_B, b"\xa0")
+#     count = 0
+#     sum_heading_angles = 0
 
-    # Write to mode Register for selecting mode
-    i2c.writeto_mem(DEVICE_ADDRESS, REGISTER_MODE, b"0")
+#     while second_thread:
+#         # Read Accelerometer raw value
+#         x = read_raw_data(X_AXIS_H)
+#         # z = read_raw_data(Z_AXIS_H)
+#         y = read_raw_data(Y_AXIS_H)
 
+#         heading = math.atan2(y, x) + DECLINATION
 
-# ----------------------------------
-#  Read HMC5883L magnetometer data:
-# ----------------------------------
-def read_raw_data(addr):
-    # Read raw 16-bit value
-    byte_high = i2c.readfrom_mem(DEVICE_ADDRESS, addr, 1)
-    byte_low = i2c.readfrom_mem(DEVICE_ADDRESS, addr + 1, 1)
+#         # Due to declination check for >360 degree
+#         if heading > 2 * PI:
+#             heading = heading - 2 * PI
 
-    # Convert to integer
-    high = int.from_bytes(byte_high, "big")
-    low = int.from_bytes(byte_low, "big")
+#         # Check for sign
+#         if heading < 0:
+#             heading = heading + 2 * PI
 
-    # Concatenate higher and lower value (only works with integers)
-    value = (high << 8) | low
+#         # Convert into angle
+#         heading_angle = heading * 180 / PI
 
-    # To get signed value from module
-    if value > 32768:
-        value = value - 65536
+#         count += 1
 
-    return value
+#         sum_heading_angles = sum_heading_angles + heading_angle
 
+#         if count == 10:
+#             avg_heading = round(sum_heading_angles / count, 1)
+
+#             count = 0
+#             sum_heading_angles = 0
+
+#             # start_time = utime.ticks_ms()
+#             # interval = 500
+#             # while utime.ticks_ms() - start_time < interval:
+#             #    pass
+#         utime.sleep(0.2) #is this blocking, e.g. irq
 
 # =========
 #  Helpers
 # =========
 
+# # Start heading monitor as second thread
+# def start_heading_monitor():
+#     print("---> Start heading monitor in second thread")
+#     global second_thread
+#     second_thread = True
+#     _thread.start_new_thread((monitor_heading), ())
 
-# Start heading monitor as second thread
-def start_heading_monitor():
-    global second_thread
-    second_thread = True
-    print("--- Start heading monitor")
-    _thread.start_new_thread((monitor_heading), ())
 
-
-# Trigger second thread stop
-def stop_heading_monitor():
-    global second_thread
-    second_thread = False
-    _thread.exit()
+# # Trigger second thread stop
+# def stop_heading_monitor():
+#     global second_thread
+#     second_thread = False
+#     _thread.exit()
+#     print("---> Second thread with heading monitor stopped")
 
 
 # Reset obstacle flags
@@ -288,7 +297,6 @@ def reset_counters():
     global rear_right_motor_count
     rear_right_motor_count = 0
 
-
 # ====================
 #  Interrupt Handlers
 # ====================
@@ -297,31 +305,25 @@ def reset_counters():
 #  Wheel rotation sensor slot counters
 # -------------------------------------
 
-
 def front_left_motor_counter(pin):
     global front_left_motor_count
     front_left_motor_count += 1
-
 
 def front_right_motor_counter(pin):
     global front_right_motor_count
     front_right_motor_count += 1
 
-
 def rear_left_motor_counter(pin):
     global rear_left_motor_count
     rear_left_motor_count += 1
-
 
 def rear_right_motor_counter(pin):
     global rear_right_motor_count
     rear_right_motor_count += 1
 
-
 # ------------------------------------
 #  Handlers for IR obstacle detection
 # ------------------------------------
-
 
 def set_front_obstacle(pin):
     global front_obstacle
@@ -330,7 +332,6 @@ def set_front_obstacle(pin):
         front_obstacle = True
         print("---> IRQ source: ", pin)
 
-
 def set_rear_obstacle(pin):
     global rear_obstacle
 
@@ -338,14 +339,11 @@ def set_rear_obstacle(pin):
         rear_obstacle = True
         print("---> IRQ source: ", pin)
 
-
 def clear_left_obstacle(pin):
     global left_obstacle
-
     if left_obstacle == True:
         left_obstacle = False
         print("---> IRQ source: ", pin)
-
 
 def clear_right_obstacle(pin):
     global right_obstacle
@@ -354,69 +352,13 @@ def clear_right_obstacle(pin):
         right_obstacle = False
         print("---> IRQ source: ", pin)
 
-
-# ========================
-#  Second Thread Function
-# ========================
-def monitor_heading():
-    print("--> Heading monitor started")
-
-    global avg_heading
-
-    count = 0
-    sum_heading_angles = 0
-
-    while second_thread:
-        # Read Accelerometer raw value
-        x = read_raw_data(X_AXIS_H)
-        z = read_raw_data(Z_AXIS_H)
-        y = read_raw_data(Y_AXIS_H)
-
-        # print("X: ", x)
-        # print("Y: ", y)
-
-        heading = math.atan2(y, x) + DECLINATION
-
-        # Due to declination check for >360 degree
-        if heading > 2 * PI:
-            heading = heading - 2 * PI
-
-        # Check for sign
-        if heading < 0:
-            heading = heading + 2 * PI
-
-        # Convert into angle
-        heading_angle = heading * 180 / PI
-
-        # print("Heading angle: ", heading)
-
-        count += 1
-        # print("Compass counter: ", count)
-        sum_heading_angles = sum_heading_angles + heading_angle
-
-        if count == 50:
-            # print(sum_heading_angles, " ", round(sum_heading_angles/count, 1))
-            # print ("Heading Angle = %d°" %(sum_heading_angles/count))
-            avg_heading = round(sum_heading_angles / count, 1)
-            count = 0
-            sum_heading_angles = 0
-
-            start_time = utime.ticks_ms()
-            interval = 500
-            while utime.ticks_ms() - start_time < interval:
-                pass
-            # utime.sleep(0.5) is this blocking, e.g. irq
-    print("--> Heading monitor stopped")
-
-
 # ==================
 #  Hardware Control
 # ==================
 
-
-# -------------------
-#  Blink Onboard LED
-# -------------------
+# -----------------------
+#  Onboard LED Functions
+# -----------------------
 def blink(num, on, off):
     led.value(0)
     utime.sleep(0.2)
@@ -429,11 +371,67 @@ def blink(num, on, off):
         #    utime.sleep(off)
     utime.sleep(0.2)
 
+# ---------------------------------
+#  HMC5883L Nagnetometer Functions
+# ---------------------------------
+def read_raw_data(addr):
+    # Read raw 16-bit value
+    byte_high = i2c.readfrom_mem(DEVICE_ADDRESS, addr, 1)
+    byte_low = i2c.readfrom_mem(DEVICE_ADDRESS, addr + 1, 1)
+
+    # Convert to integer
+    high = int.from_bytes(byte_high, "big")
+    low = int.from_bytes(byte_low, "big")
+
+    # Concatenate higher and lower value (only works with integers)
+    value = (high << 8) | low
+
+    # To get signed value from module
+    if value > 32768:
+        value = value - 65536
+
+    return value
+
+def heading():
+    # Return current heading of nav-bot
+    # Heading is the average of 10 readings
+
+    count = 0
+    sum_heading_angles = 0
+
+    while count <= 10:
+        count += 1
+        # Read compass raw value
+        x = read_raw_data(X_AXIS_H)
+        z = read_raw_data(Z_AXIS_H)
+        y = read_raw_data(Y_AXIS_H)
+
+        heading = math.atan2(y, x) + DECLINATION
+        # Check for >360 degree
+        if heading > 2 * PI:
+            heading = heading - 2 * PI
+        # Check for sign
+        if heading < 0:
+            heading = heading + 2 * PI
+        # Convert into angle
+        heading_angle = heading * 180 / PI
+        
+        # Sum angles to enable average heading calculation
+        sum_heading_angles = sum_heading_angles + heading_angle
+        utime.sleep(0.2)
+        # start_time = utime.ticks_ms()
+        # interval = 500
+        # while utime.ticks_ms() - start_time < interval:
+        #    pass
+    
+    # Calculate average heading angle
+    avg_heading = round(sum_heading_angles / count, 1)
+        
+    return avg_heading
 
 # ---------------------
 #  Bluetooth Functions
 # ---------------------
-
 
 def send_data(tx_data):
     tx_data_json = json.dumps(tx_data)
@@ -445,7 +443,6 @@ def send_data(tx_data):
     # buf must have an even number of bytes
     # Returns the number of bytes written
     print("Bytes sent", bytes_sent)
-
 
 def receive_data():
     # read() = read all available characters
@@ -462,7 +459,6 @@ def receive_data():
         return ""
 
     return json.loads(rx_data)
-
 
 def send_progress(timer_2):
     progress = {}
@@ -482,7 +478,6 @@ def send_progress(timer_2):
 
     send_data(progress)
     print("Progress message: ", progress)
-
 
 # ------------------------
 #  Sonic Sensor Functions
@@ -532,7 +527,7 @@ def sonic_sense(timer_1):
     # Determine current free distance
     global sonic_distance
     sonic_distance = get_sonic_distance()
-    print("---> Sensor distance is: ", sonic_distance, "cm")
+    # print("---> Sensor distance is: ", sonic_distance, "cm")
 
     # If free distance is limited stop
     if sonic_distance < 5:
@@ -556,7 +551,6 @@ def sonic_sense(timer_1):
 # -------------------------
 #  Servo Control Functions
 # -------------------------
-
 
 def cycle_servo():
     print("--- Servo cycle test")
@@ -710,22 +704,20 @@ def stop():
 
     print("--- STOPPED ---")
 
-
 # Define motor turn states
 
-
-def turn_left():
+def pivot_left():
     # Static left pivot - left motors reverse & right motors forward
-    print("<<< TURN LEFT ---")
+    print("<<< PIVOT LEFT ---")
     right_reverse.low()
     left_forward.low()
     left_reverse.high()
     right_forward.high()
 
 
-def turn_right():
+def pivot_right():
     # Static right turn - left motors forward & right motors reverse
-    print("--- TURN RIGHT >>>")
+    print("--- PIVOT RIGHT >>>")
     right_forward.low()
     left_reverse.low()
     right_reverse.high()
@@ -860,7 +852,7 @@ def best_deviation_angle():
         print("Scan Left")
 
         left_outcome = find_gap(scan_data, "left", vehicle_width, scan_depth)
-        # result, avg_distance, last_scan_angle
+        # outcome = result, avg_distance, last_scan_angle
 
         print("Left scan result: ", left_outcome)
         if (left_outcome[0] == True) and (right_outcome[0] == True):
@@ -927,111 +919,7 @@ def calc_heading(turn_angle):
     return heading
 
 
-# def best_deviation_angle():
-#     #
-#     # This function return the best heading deviation angle to avoid an obstacle using
-#     # the sonic scanner.
-#     # The deviation angle is the scan angle with greatest free range
-#     #
-#     # Problem:
-#     # To avoid an obstacle, a gap that is wide enough for the vehicle to pass through is required.
-#     # The best deviation angle would then be in the middle of the gap
-#     # A single scan in a direction is very narrow.
-#     # Each scan is a 7 degree cone.
-#     # Therefore multiple scans in a contiguous range is required.
-#     # The contiguous scan range must cover a width equal to the vehicle's width
-#     # How many scans would provide the required range?
-#     # The width of the cone is distance dependent. E.g. @ 10cm (adjacent and hypotenuse)
-#     # the width (opposite for 7 degree angle) would be about 1.22cm.
-#     # A 70 degree scan at a distance of 15 cm would give a width of 17.2 cm
-#     # That would be 10 continuous scan points.
-#     #
-#     # Also:
-#     # What if no solution is found?
-#     # Turn 90 degrees and scan again?
-
-#     # Stop scan timer
-#     timer_1.deinit()
-
-#     print("---> Sonic scan timer stopped")
-
-#     free_distance = 0
-#     best_distance = 0
-#     best_angle = 0
-
-#     # Find best detour direction using the sonic sensor to scan
-#     # for the direction with most open space.
-#     for scan_angle in range(6, 174, 7):
-#         # The scan_angle is the position of the scanner on the scan arc
-#         # The scanner is pointing straight ahead when the scan-angle = 90 degrees
-#         # The scanner is pointing to the right when the scan-angle < 90 degrees
-#         # The scanner is pointing to the left when the scan-angle > 90 degrees
-
-#         # The actual arc of the servo is not a full 180 degrees.
-#         # What range and what scan step should be used?
-#         #
-#         # Scan step:
-#         # A scan step of 10 degrees will result in gaps in the scan arc.
-#         # At 10 degrees the scan would cover from 10 - (7 / 2) = 6.5 degrees to 10 + (7 / 2) = 13.5 degrees
-#         # At 20 degrees the scan would cover from 20 - (7 / 2) = 16.5 degrees to 20 + (7 / 2) = 23.5 degrees
-#         # A 7 degree step would not result in gaps as shown below:
-#         # At 10 degrees the scan would cover from 10 - (7 / 2) = 6.5 degrees to 10 + (7 / 2) = 13.5 degrees
-#         # At 17 degrees the scan would cover from 17 - (7 / 2) = 13.5 degrees to 17 + (7 / 2) = 20.5 degrees
-#         # At 24 degrees the scan would cover from 24 - (7 / 2) = 20.5 degrees to 17 + (7 / 2) = 27.5 degrees
-#         #
-#         # Scan range:
-#         # 90 degrees is directly ahead with a scan area from 86.5 to 93.5 degrees.
-#         # Using the 7 degree step from above the next scan point would be 83 degrees.
-#         # A scan direction of 83 degree would cover 79.5 to 86.5 degrees.
-#         # The left and right side must have an equal number of scan points.
-#         # Scan points per side would be 90 / 7 which gives a whole number of 12.
-#         # Therefore the scan start point would be 90 - (7 x 12) = 90 - 84 = 6 degrees
-#         # and the scan end point would be 90 + 84 = 174 degrees.
-#         # This would give a total scan arc of 6 - 3.5 = 2.5 and 174 + 3.5 = 177.5
-#         # Scan points 6, 13, 20, 27, 34, 41, 48, 55, 62, 69, 76, 83, 90, 97, 104, 111, 118, 125, 132, 139, 146, 153, 160, 167, 174
-#         # Front scan point: 90
-#         # Left of front:  97, 104, 111, 118, 125, 132, 139, 146, 153, 160, 167, 174
-#         # Right of front: 83,  76,  69,  62,  55,  48,  41,  34,  27,  20,  13,   6
-
-#         print("Scan angle: ", scan_angle)
-
-#         # Get free distance for the scan angle
-#         angle_servo(scan_angle)
-#         free_distance = get_sonic_distance()
-
-#         # Determine the deviation angle
-#         deviation_angle = 90 - scan_angle
-#         # The deviation angle is the angle between the center line
-#         # and the scanning direction on the scan arc.
-#         # It gives the degrees the vehicle must turn to align its center
-#         # line with the scan direction.
-#         # If positive turn right
-#         # if negative turn left
-
-#         print("Deviation angle: ", deviation_angle, "Free distance: ", free_distance)
-
-#         if free_distance > best_distance:
-#             best_angle = deviation_angle
-#             best_distance = free_distance
-
-#     print(
-#         f"The best deviation angle is {best_angle} deg, with a free distance of {best_distance} cm"
-#     )
-
-#     # set to scan straight ahead
-#     angle_servo(90)
-
-#     # Start scan timer again
-#     timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-
-#     print("--- Sonic scan timer restarted")
-
-#     return best_angle
-
-
-def calc_target_pos(
-    deviation_angle, detour_distance, remaining_distance, obstacle_side
-):
+def calc_target_pos(deviation_angle, detour_distance, remaining_distance, obstacle_side):
     # a) Calculate target position (heading & distance) from current detour position.
     #    This will be the new dead reconning point.
     # b) If the detour is successful in avoiding the obstacle the NavBot will
@@ -1155,7 +1043,6 @@ def calc_target_pos(
 #  Drive Functions
 # =================
 
-
 def correction(side, correction):
     # Correct small heading deviations while driving by setting different left and right
     # motor speeds based on the degree of deviation.
@@ -1217,7 +1104,7 @@ def verify_heading(heading, speed, clicks_remaining):
     # is a major difference then the drive should be stopped and a course
     # correction must be made.
 
-    curr_heading = avg_heading
+    curr_heading = heading()
     deviance = abs(heading - curr_heading)
 
     while deviance > 1 and clicks_remaining > 10:
@@ -1230,33 +1117,6 @@ def verify_heading(heading, speed, clicks_remaining):
     set_speed(speed)
 
 
-# def calc_click_distance():
-
-#     wheel_circumference = 2 * 3.1415 * (wheel_diameter / 2) # mm
-#     distance_per_click = wheel_circumference / (encoder_slots) # mm
-#     print ("--- Click distance = ", distance_per_click, " mm")
-
-#     return distance_per_click
-
-#
-#  Convert distance (cm) into slots count
-#
-# def calc_clicks(distance_cm):
-#     #print ("--- Convert distance to clicks")
-#     distance_mm = distance_cm * 10
-#     clicks = int(distance_mm / calc_click_distance())
-#     #print ("=== The distance of ", distance_cm, "cm equals ", clicks, " sensor clicks")
-#     return clicks
-
-# #
-# #  Convert clicks counted to distance travelled
-# #
-# def calc_distance(clicks):
-#     distance_mm = clicks * calc_click_distance()
-#     distance_cm = distance_mm / 10
-#     return distance_cm
-
-
 def turn_to_heading(target_heading):
     #
     # Course correction at waypoint or at detour point.
@@ -1265,83 +1125,107 @@ def turn_to_heading(target_heading):
 
     print("--- Turn to Heading ---")
 
+    # Determine current heading
+    curr_heading = heading()
+
     #
     # Big step turn when far from required heading.
     #
-    pulse = 150  # ms
-    set_speed("slow")
-    utime.sleep_ms(100)
+    # pulse = 150  # ms
+    # set_speed("slow")
+    # utime.sleep_ms(100)
 
-    curr_heading = avg_heading
-
-    while abs(curr_heading - target_heading) > 20:
-        print("Turn-0")
-
-        print(abs(curr_heading - target_heading))
-
+    while abs(curr_heading - target_heading) > 0:
+        
+        if abs(curr_heading - target_heading) > 20:
+            print("*** Big Step ***")
+            pulse = 150  # ms
+            set_speed("slow")
+        else:
+            print("--- Small Step ---")
+            pulse = 25  # ms
+            set_speed("crawl")
         #
-        # Determine shortest turn direction
+        # Shortest turn direction
         #
-
         if curr_heading > target_heading:
             if curr_heading - target_heading > 180:
-                turn_right()
+                pivot_right()
             else:
-                turn_left()
+                pivot_left()
 
-        else:
-            if curr_heading - target_heading < -180:
-                turn_left()
+        elif curr_heading < target_heading:
+            if target_heading - curr_heading > 180:
+                pivot_left()
             else:
-                turn_right()
+                pivot_right()
 
         utime.sleep_ms(pulse)
 
         stop()
+        
+        print(
+            "Heading - Current: ",
+            curr_heading,
+            " - Target: ",
+            target_heading,
+            " - Deviation: ",
+            abs(curr_heading - target_heading),
+        )
 
         blink(2, 0.1, 0.3)
 
-        curr_heading = avg_heading
-
-    #
-    # Small step turn when close to required heading.
-    #
-    pulse = 25  # ms
-    set_speed("crawl")
-    utime.sleep_ms(100)
-
-    while abs(curr_heading - target_heading) > 0:
-        print("Turn-1")
-
-        print(abs(curr_heading - target_heading))
+        # Get heading after turn
+        curr_heading = heading()
+        utime.sleep(2)
 
         #
-        # Determine shortest turn direction
+        # Small step turn when close to required heading.
         #
-        if curr_heading > target_heading:
-            if curr_heading - target_heading > 180:
-                print(">>> Right")
-                turn_right()
-            else:
-                print("<<< Left")
-                turn_left()
+        # pulse = 25  # ms
+        # set_speed("crawl")
+        #utime.sleep_ms(100)
 
-        else:
-            if curr_heading - target_heading < -180:
-                print("<<< Left")
-                turn_left()
-            else:
-                print(">>> Right")
-                turn_right()
+#     while abs(curr_heading - target_heading) > 0:
+#         print("Small Step")
+#         print(
+#             "Heading - Current: ",
+#             curr_heading,
+#             "Target: ",
+#             target_heading,
+#             "Deviation: ",
+#             abs(curr_heading - target_heading),
+#         )
+#         #
+#         # Determine shortest turn direction
+#         #
+#         if curr_heading < target_heading:
+#             if curr_heading - target_heading > 180:
+#                 print(">>> Right")
+#                 turn_right()
+#             else:
+#                 print("<<< Left")
+#                 turn_left()
+# 
+#         else:
+#             if curr_heading - target_heading < -180:
+#                 print("<<< Left")
+#                 turn_left()
+#             else:
+#                 print(">>> Right")
+#                 turn_right()
 
-        utime.sleep_ms(pulse)
+#         utime.sleep_ms(pulse)
+# 
+#         stop()
+#         
+#         blink(1, 0.1, 0.3)
+# 
+#         # Get heading after turn
+#         curr_heading = heading()
+#         utime.sleep(3)
 
-        stop()
-        blink(1, 0.1, 0.3)
-        # time.sleep(0.3)
-        curr_heading = avg_heading
-
-    print("---> Compass Heading: = %d°" % (avg_heading))
+    print("---> Compass Heading: = %d°" % (heading()))
     stop()
 
 
@@ -1540,7 +1424,7 @@ def target_drive(target_heading, target_clicks):
 
     # Continue drive while average distance is less
     # than target distance and no obstacle detected
-    while avg_clicks < target_clicks and not obstacle:
+    while avg_clicks < target_clicks and not front_obstacle:
         if (avg_clicks / target_clicks) * 100 > 80.0 and not near_target:
             # Slow down when 80% complete
             near_target = True
@@ -1588,12 +1472,12 @@ def drive_leg(target_heading, target_clicks):
     leg_state = ""
 
     while leg_state != "complete":
-        print("---> Current heading: ", avg_heading)
+        print("---> Current heading: ", heading())
 
         # Turn to required heading
         turn_to_heading(target_heading)
 
-        print("---> Heading after turn: ", avg_heading)
+        print("---> Heading after turn: ", heading())
 
         # Drive to target
         print("---> Drive to target")
@@ -1680,7 +1564,7 @@ def drive_leg(target_heading, target_clicks):
 # (d) Stop msg_body = {'type' : 'STOP','data' : []}
 
 
-def get_target():
+def get_route():
     # The command module will connect to the control module. The control module
     # will then receive the route and the go command from the command module
 
@@ -1690,9 +1574,9 @@ def get_target():
 
     global bot_state
     bot_state = ""
-    con_cmd = False
-    nav_cmd = False
-    go_cmd = False
+    con_cmd = False  # connection state
+    nav_cmd = False  # nav data state
+    go_cmd = False  # execute drive
     route_cmd = {}
 
     # Ready for connection from command module
@@ -1781,34 +1665,28 @@ def go_target(target_route):
 
     print("--- Start Drive Resources")
 
-    # Start reading compass to monitor heading
-    print("---> Start heading monitor")
-    blink(1, 0.5, 0.4)
-    start_heading_monitor()
-    print("---> Heading monitor started")
-    utime.sleep(1)
-    print("---> Current heading: ", avg_heading)
+    # # Start reading compass to monitor heading
+    # print("---> Start heading monitor")
+    # blink(1, 0.5, 0.4)
+    # start_heading_monitor()
+    # print("---> Heading monitor started")
+    # utime.sleep(1)
+    # print("---> Current heading: ", avg_heading)
 
-    # Test servo
-    print("--- Test servo ---")
-    blink(2, 0.5, 0.4)
-    cycle_servo()
-    print("--- Servo tested ---")
-
-    # Configure timer interrupt event for sonic sensor
-    print("---> Start sonic timer")
-    blink(3, 0.5, 0.3)
-    timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
-    print("---> Sonic timer started")
+    # # Configure timer interrupt event for sonic sensor
+    # print("---> Start sonic timer")
+    # blink(3, 0.5, 0.3)
+    # timer_1.init(freq=1, mode=Timer.PERIODIC, callback=sonic_sense)
+    # print("---> Sonic timer started")
 
     # Configure timer interrupt event for progress update
     # Period is in milliseconds; 1 second = 1000
     # timer_2.init(period=500, mode=Timer.PERIODIC, callback=send_progress)
     # But freq=1 just seems to work better. Why? Need to find this out!
-    print("---> Start progress feedback timer")
-    blink(4, 0.5, 0.4)
-    timer_2.init(freq=1, mode=Timer.PERIODIC, callback=send_progress)
-    print("---> Progress feedback timer started")
+    #     print("---> Start progress feedback timer")
+    #     blink(4, 0.5, 0.4)
+    #     timer_2.init(freq=1, mode=Timer.PERIODIC, callback=send_progress)
+    #     print("---> Progress feedback timer started")
 
     # --------------------------
     #  Calculate click distance
@@ -1888,41 +1766,60 @@ def main():
     try:
         print("--- Main Start ---")
 
-        route = get_target()
+        # Test servo
+        print("--- Test servo ---")
+        blink(2, 0.5, 0.4)
+        # cycle_servo()
+        print("--- Servo tested ---")
+        
+        print("--- Test motors ---")
+        print("<<< Left")
+        pivot_left()
+        utime.sleep_ms(50)
+        stop()
+        blink(1, 0.1, 0.3)
+        print(">>> Right")
+        pivot_right()
+        utime.sleep_ms(50)
+        stop()
+        blink(1, 0.1, 0.3)
+        print("--- Motors tested ---")
 
-        print("--- Target received")
+        # Get route data
+        print("--- Get the route")
+        # route = get_route() # get route from Command module
+        # For testing without Command module
+        route = [{"leg": 1, "head": 90, "dist": 150}]
+        print("--- Route received")
 
+        # Drive route
+        print("--- Start drive to target")
         go_target(route)
-
         print("--- Drive to target Complete ---")
 
         print("--- Main END ---")
 
     except Exception as ex:
-        # Exception, stop motors
-        stop()
+        stop()  # Exception, stop motors
 
         print("An exception has occurred!")
         print(ex)
         print("=== End Execution ===")
-
-        timer_1.deinit()
-        timer_2.deinit()
-        stop_heading_monitor()
-        sys.exit()
+        
+    except keyboardInterrupt:
+        stop()  # stop motors
+        print("Keyboard Interrupt - ctrl + c")
 
     except:
-        # Exception, stop motors
-        stop()
-        print("An error has occurred.")
+        stop()  # stop motors
+        print("Stop, exception")
 
     finally:
         # Cleanup
-        stop()
+        # stop_heading_monitor()
         timer_1.deinit()
         timer_2.deinit()
-        stop_heading_monitor()
-        # sys.exit()
+        sys.exit()
 
 
 # ===============================

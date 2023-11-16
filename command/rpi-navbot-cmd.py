@@ -348,7 +348,7 @@ def load_routes():
                 ],
             },
             {
-                "num": 3,  # the dog led ally test
+                "num": 3,  # the dog leg ally test
                 "desc": "Obstacle Navigation Test",
                 "legs": [{"leg": 1, "head": 350, "dist": 150}],
             },
